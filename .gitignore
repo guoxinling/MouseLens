@@ -1,0 +1,20 @@
+.DS_Store
+
+# Xcode build products and local caches
+.DerivedData*/
+Build/
+BuildRelease/
+*.app
+*.app.dSYM
+*.dSYM
+
+# Local signing and credentials
+.signing/
+
+# Swift package / Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# Python or local tooling artifacts
+__pycache__/
+*.pyc

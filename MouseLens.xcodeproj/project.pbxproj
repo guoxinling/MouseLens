@@ -1,0 +1,749 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C600B02748D9ED6E654808 /* PermissionGateView.swift */; };
+		0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */; };
+		118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92E933D7DB3407EA9D77750 /* ProjectModels.swift */; };
+		175F7434233F0509C9554848 /* RecordingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81318E147711A2C2F2CE4B4F /* RecordingState.swift */; };
+		1A9D192D2241014830F7D2C5 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A617C80326E0367CD783A13F /* EditorView.swift */; };
+		26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */; };
+		32F023939D47F1EBDA472F23 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD12DBA90338B67660F8A78 /* AppEnvironment.swift */; };
+		35933D9AD6426C73850DA380 /* InputModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301799F17CA05B8E594B88EE /* InputModels.swift */; };
+		406621644479203AA5EB640A /* EditorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1182832D4DFB818974F0A533 /* EditorViewModel.swift */; };
+		45FCAA7F760C14E8FA80CB80 /* Comparable+Clamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14F91D82714FB0912E14618 /* Comparable+Clamp.swift */; };
+		54F353E4865D246A39709A94 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5507A3B2A37F44792C466A1F /* AppTheme.swift */; };
+		644B6B00A9321C433514ADB9 /* PreviewCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C309A0BE8A8503719E642DB1 /* PreviewCanvasView.swift */; };
+		6B9360A5539EE2CA27512CB8 /* MetricSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FC2DDFA948023BCA52EAC23 /* MetricSlider.swift */; };
+		6F49A6350B44E5F2413BE93A /* EditorViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE6630189503791E3E7621D /* EditorViewModelTests.swift */; };
+		71B98F73FABE1DF447FE461B /* MouseLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10D9FFAFE17E315029467454 /* MouseLensApp.swift */; };
+		744FF6CFC391C6F193F62D3A /* CaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */; };
+		7ADBA69F83A9751B5366274C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABA3DFA892793AC5E2A8B05 /* HomeView.swift */; };
+		83108CE3CDEE77D84EFF625F /* ExportPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */; };
+		840987137B9ACEDFC5C4FD7D /* RenderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9292717184450E66935639A4 /* RenderModels.swift */; };
+		8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */; };
+		99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */; };
+		A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E212BAF15684F714399474C /* CameraPlanning.swift */; };
+		B1E4614D6011123A87634B30 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */; };
+		B2864C03D2FD058647EDA2B9 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490A410508B7A8D23900CB7E /* ExportSheetView.swift */; };
+		B89E5847D9260FDB1F0F9B67 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB2CDB03EC25F552570524D /* AppPreferencesStoreTests.swift */; };
+		CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F526659EF95F3FF4AE36 /* PermissionsViewModel.swift */; };
+		D58C64FA34281F91A22755D4 /* SettingRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DD250147D43817C9826F742 /* SettingRow.swift */; };
+		E177C764DADC0CDF48660CC7 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459C8CEFCF22A3BA48C654F8 /* SystemServices.swift */; };
+		F245C01CB55A153D17EFD643 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C447F994700574E687752A /* AppCoordinator.swift */; };
+		F3DA86BB86CB67C5BFE2AAAF /* CameraPlanEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */; };
+		F44E3B17378EA446B5A55501 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300162559D5DEDEAADA5E2DF /* SettingsView.swift */; };
+		F522062460B28B6FD6B6AC5E /* ExportFilenameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */; };
+		FD85B10F280D226F2D06FE75 /* SourceCropPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A2728789C13EFB94F64CCD25 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A691DBC3E379F2F06E2421E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5877CFE6D5510830EA79939A;
+			remoteInfo = MouseLens;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanEngineTests.swift; sourceTree = "<group>"; };
+		10D9FFAFE17E315029467454 /* MouseLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseLensApp.swift; sourceTree = "<group>"; };
+		1182832D4DFB818974F0A533 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModel.swift; sourceTree = "<group>"; };
+		21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportFilenameTests.swift; sourceTree = "<group>"; };
+		2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureModels.swift; sourceTree = "<group>"; };
+		300162559D5DEDEAADA5E2DF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		301799F17CA05B8E594B88EE /* InputModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputModels.swift; sourceTree = "<group>"; };
+		459C8CEFCF22A3BA48C654F8 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
+		490A410508B7A8D23900CB7E /* ExportSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheetView.swift; sourceTree = "<group>"; };
+		4E212BAF15684F714399474C /* CameraPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanning.swift; sourceTree = "<group>"; };
+		5507A3B2A37F44792C466A1F /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		57C447F994700574E687752A /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCropPlannerTests.swift; sourceTree = "<group>"; };
+		6004F526659EF95F3FF4AE36 /* PermissionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsViewModel.swift; sourceTree = "<group>"; };
+		6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		6DB2CDB03EC25F552570524D /* AppPreferencesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStoreTests.swift; sourceTree = "<group>"; };
+		7FC2DDFA948023BCA52EAC23 /* MetricSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricSlider.swift; sourceTree = "<group>"; };
+		80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingHUDView.swift; sourceTree = "<group>"; };
+		81318E147711A2C2F2CE4B4F /* RecordingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingState.swift; sourceTree = "<group>"; };
+		8AD12DBA90338B67660F8A78 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		8DD250147D43817C9826F742 /* SettingRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingRow.swift; sourceTree = "<group>"; };
+		9292717184450E66935639A4 /* RenderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderModels.swift; sourceTree = "<group>"; };
+		94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		A617C80326E0367CD783A13F /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
+		A8C600B02748D9ED6E654808 /* PermissionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGateView.swift; sourceTree = "<group>"; };
+		B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportPresetTests.swift; sourceTree = "<group>"; };
+		C309A0BE8A8503719E642DB1 /* PreviewCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewCanvasView.swift; sourceTree = "<group>"; };
+		CABA3DFA892793AC5E2A8B05 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		CE6DF292708123151C858EE1 /* MouseLensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouseLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D92E933D7DB3407EA9D77750 /* ProjectModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
+		DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStoreTests.swift; sourceTree = "<group>"; };
+		E43C0583E25B59D88E9C5A8D /* MouseLens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MouseLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EDE6630189503791E3E7621D /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModelTests.swift; sourceTree = "<group>"; };
+		F14F91D82714FB0912E14618 /* Comparable+Clamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Comparable+Clamp.swift"; sourceTree = "<group>"; };
+		FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPermissionsTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		00C09AC13696FD241396E188 /* Controls */ = {
+			isa = PBXGroup;
+			children = (
+				7FC2DDFA948023BCA52EAC23 /* MetricSlider.swift */,
+				8DD250147D43817C9826F742 /* SettingRow.swift */,
+			);
+			path = Controls;
+			sourceTree = "<group>";
+		};
+		26E2EE8CF95F1167893F3F81 /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				A617C80326E0367CD783A13F /* EditorView.swift */,
+				1182832D4DFB818974F0A533 /* EditorViewModel.swift */,
+				490A410508B7A8D23900CB7E /* ExportSheetView.swift */,
+				C309A0BE8A8503719E642DB1 /* PreviewCanvasView.swift */,
+			);
+			path = Editor;
+			sourceTree = "<group>";
+		};
+		2A1E2A425E95F9B62E7D1B48 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				AA7EA51047DED548FC5E57C6 /* App */,
+				7B7DECF11E0079BF3F6A1F8C /* Core */,
+				81D10DB27DF25B10A419B877 /* DesignSystem */,
+				F1129FD1FF525EA1B4A53D0F /* Features */,
+				BC9A35A2498A04BBE9E190D2 /* Support */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		35FEBCE05516A047EAAE5D91 /* Motion */ = {
+			isa = PBXGroup;
+			children = (
+				4E212BAF15684F714399474C /* CameraPlanning.swift */,
+			);
+			path = Motion;
+			sourceTree = "<group>";
+		};
+		41E2F805156907B0408937DE /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				EDE6630189503791E3E7621D /* EditorViewModelTests.swift */,
+			);
+			path = Editor;
+			sourceTree = "<group>";
+		};
+		44BCA902D5E72C2669B25EF1 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				41E2F805156907B0408937DE /* Editor */,
+				61CD152CCF8F6762F791C9E5 /* Motion */,
+				880F26D8A3DE300CFCF88175 /* Permissions */,
+				9FAFB56D1CC9D86849AADDFA /* Preferences */,
+				E094F1D4F3920C143A5C02D2 /* Render */,
+				D98F9C323B2D031400842CC7 /* Storage */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		5E246392B224DAC7D15FDA44 = {
+			isa = PBXGroup;
+			children = (
+				2A1E2A425E95F9B62E7D1B48 /* Sources */,
+				44BCA902D5E72C2669B25EF1 /* Tests */,
+				AE52A0AA0F46FDCF3F8EA1BD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5F698D95E373A1F759F9B6B9 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				F14F91D82714FB0912E14618 /* Comparable+Clamp.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		61CD152CCF8F6762F791C9E5 /* Motion */ = {
+			isa = PBXGroup;
+			children = (
+				035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */,
+			);
+			path = Motion;
+			sourceTree = "<group>";
+		};
+		6A88625E83867F0D1C09987A /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				300162559D5DEDEAADA5E2DF /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		763AB93CBA2A9287DE7DAF26 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				CABA3DFA892793AC5E2A8B05 /* HomeView.swift */,
+				6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		7B7DECF11E0079BF3F6A1F8C /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				FD8DF18AF54F4DD03E26D2CE /* Capture */,
+				B288D52E33C80A35D45A539E /* Input */,
+				35FEBCE05516A047EAAE5D91 /* Motion */,
+				B461677CECF344DAF0FE7FAA /* Render */,
+				8849A2FA0FA1342EF81D6370 /* Storage */,
+				B9B05405D2B6FC106AECD7FC /* System */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		81D10DB27DF25B10A419B877 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				5507A3B2A37F44792C466A1F /* AppTheme.swift */,
+				00C09AC13696FD241396E188 /* Controls */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		880F26D8A3DE300CFCF88175 /* Permissions */ = {
+			isa = PBXGroup;
+			children = (
+				FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */,
+			);
+			path = Permissions;
+			sourceTree = "<group>";
+		};
+		8849A2FA0FA1342EF81D6370 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				D92E933D7DB3407EA9D77750 /* ProjectModels.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		9FAFB56D1CC9D86849AADDFA /* Preferences */ = {
+			isa = PBXGroup;
+			children = (
+				6DB2CDB03EC25F552570524D /* AppPreferencesStoreTests.swift */,
+			);
+			path = Preferences;
+			sourceTree = "<group>";
+		};
+		AA7EA51047DED548FC5E57C6 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				57C447F994700574E687752A /* AppCoordinator.swift */,
+				8AD12DBA90338B67660F8A78 /* AppEnvironment.swift */,
+				10D9FFAFE17E315029467454 /* MouseLensApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AE52A0AA0F46FDCF3F8EA1BD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E43C0583E25B59D88E9C5A8D /* MouseLens.app */,
+				CE6DF292708123151C858EE1 /* MouseLensTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B288D52E33C80A35D45A539E /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				301799F17CA05B8E594B88EE /* InputModels.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		B461677CECF344DAF0FE7FAA /* Render */ = {
+			isa = PBXGroup;
+			children = (
+				9292717184450E66935639A4 /* RenderModels.swift */,
+			);
+			path = Render;
+			sourceTree = "<group>";
+		};
+		B60AEB916C9A2DC56EF82733 /* Recording */ = {
+			isa = PBXGroup;
+			children = (
+				80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */,
+				81318E147711A2C2F2CE4B4F /* RecordingState.swift */,
+			);
+			path = Recording;
+			sourceTree = "<group>";
+		};
+		B92A7BE0F051CB92F9A9D8A6 /* Permissions */ = {
+			isa = PBXGroup;
+			children = (
+				A8C600B02748D9ED6E654808 /* PermissionGateView.swift */,
+				6004F526659EF95F3FF4AE36 /* PermissionsViewModel.swift */,
+			);
+			path = Permissions;
+			sourceTree = "<group>";
+		};
+		B9B05405D2B6FC106AECD7FC /* System */ = {
+			isa = PBXGroup;
+			children = (
+				94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */,
+				459C8CEFCF22A3BA48C654F8 /* SystemServices.swift */,
+			);
+			path = System;
+			sourceTree = "<group>";
+		};
+		BC9A35A2498A04BBE9E190D2 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				5F698D95E373A1F759F9B6B9 /* Extensions */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		D98F9C323B2D031400842CC7 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		E094F1D4F3920C143A5C02D2 /* Render */ = {
+			isa = PBXGroup;
+			children = (
+				21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */,
+				B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */,
+				5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */,
+			);
+			path = Render;
+			sourceTree = "<group>";
+		};
+		F1129FD1FF525EA1B4A53D0F /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				26E2EE8CF95F1167893F3F81 /* Editor */,
+				763AB93CBA2A9287DE7DAF26 /* Home */,
+				B92A7BE0F051CB92F9A9D8A6 /* Permissions */,
+				B60AEB916C9A2DC56EF82733 /* Recording */,
+				6A88625E83867F0D1C09987A /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		FD8DF18AF54F4DD03E26D2CE /* Capture */ = {
+			isa = PBXGroup;
+			children = (
+				2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */,
+			);
+			path = Capture;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		185EE4B795BBFE86DD948D97 /* MouseLensTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CF7805EA80B660BCBD8DF217 /* Build configuration list for PBXNativeTarget "MouseLensTests" */;
+			buildPhases = (
+				021B3B183A293AEAAB5C562D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4237DDD6B76097105019D5BA /* PBXTargetDependency */,
+			);
+			name = MouseLensTests;
+			packageProductDependencies = (
+			);
+			productName = MouseLensTests;
+			productReference = CE6DF292708123151C858EE1 /* MouseLensTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		5877CFE6D5510830EA79939A /* MouseLens */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B90A678CEF1100C8B3D781E3 /* Build configuration list for PBXNativeTarget "MouseLens" */;
+			buildPhases = (
+				596C6A7EA8CE78681A553D63 /* Sources */,
+				3C8BE310A393324EE86DE3C6 /* Stabilize local screen-recording identity */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MouseLens;
+			packageProductDependencies = (
+			);
+			productName = MouseLens;
+			productReference = E43C0583E25B59D88E9C5A8D /* MouseLens.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A691DBC3E379F2F06E2421E7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					185EE4B795BBFE86DD948D97 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					5877CFE6D5510830EA79939A = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 9F781D61D8BF6A2D2C1DB4E1 /* Build configuration list for PBXProject "MouseLens" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5E246392B224DAC7D15FDA44;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AE52A0AA0F46FDCF3F8EA1BD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5877CFE6D5510830EA79939A /* MouseLens */,
+				185EE4B795BBFE86DD948D97 /* MouseLensTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3C8BE310A393324EE86DE3C6 /* Stabilize local screen-recording identity */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stabilize local screen-recording identity";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -d \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" ]; then\n  /usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier \"com.guoxl.MouseLens\"' \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		021B3B183A293AEAAB5C562D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */,
+				B89E5847D9260FDB1F0F9B67 /* AppPreferencesStoreTests.swift in Sources */,
+				F3DA86BB86CB67C5BFE2AAAF /* CameraPlanEngineTests.swift in Sources */,
+				6F49A6350B44E5F2413BE93A /* EditorViewModelTests.swift in Sources */,
+				F522062460B28B6FD6B6AC5E /* ExportFilenameTests.swift in Sources */,
+				83108CE3CDEE77D84EFF625F /* ExportPresetTests.swift in Sources */,
+				99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */,
+				FD85B10F280D226F2D06FE75 /* SourceCropPlannerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		596C6A7EA8CE78681A553D63 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F245C01CB55A153D17EFD643 /* AppCoordinator.swift in Sources */,
+				32F023939D47F1EBDA472F23 /* AppEnvironment.swift in Sources */,
+				0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */,
+				54F353E4865D246A39709A94 /* AppTheme.swift in Sources */,
+				A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */,
+				744FF6CFC391C6F193F62D3A /* CaptureModels.swift in Sources */,
+				45FCAA7F760C14E8FA80CB80 /* Comparable+Clamp.swift in Sources */,
+				1A9D192D2241014830F7D2C5 /* EditorView.swift in Sources */,
+				406621644479203AA5EB640A /* EditorViewModel.swift in Sources */,
+				B2864C03D2FD058647EDA2B9 /* ExportSheetView.swift in Sources */,
+				7ADBA69F83A9751B5366274C /* HomeView.swift in Sources */,
+				B1E4614D6011123A87634B30 /* HomeViewModel.swift in Sources */,
+				35933D9AD6426C73850DA380 /* InputModels.swift in Sources */,
+				6B9360A5539EE2CA27512CB8 /* MetricSlider.swift in Sources */,
+				71B98F73FABE1DF447FE461B /* MouseLensApp.swift in Sources */,
+				01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */,
+				CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */,
+				644B6B00A9321C433514ADB9 /* PreviewCanvasView.swift in Sources */,
+				118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */,
+				26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */,
+				175F7434233F0509C9554848 /* RecordingState.swift in Sources */,
+				840987137B9ACEDFC5C4FD7D /* RenderModels.swift in Sources */,
+				D58C64FA34281F91A22755D4 /* SettingRow.swift in Sources */,
+				F44E3B17378EA446B5A55501 /* SettingsView.swift in Sources */,
+				E177C764DADC0CDF48660CC7 /* SystemServices.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4237DDD6B76097105019D5BA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5877CFE6D5510830EA79939A /* MouseLens */;
+			targetProxy = A2728789C13EFB94F64CCD25 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		274C279C00609F92CD4136FE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guoxl.MouseLensTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MouseLens.app/Contents/MacOS/MouseLens";
+			};
+			name = Debug;
+		};
+		4E64B8B0683F73F464FFE124 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MouseLens;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses accessibility support to detect pointer activity for automatic camera moves.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
+				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guoxl.MouseLens;
+				PRODUCT_NAME = MouseLens;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		91EAECB912FD11D2F060FD82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MouseLens;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses accessibility support to detect pointer activity for automatic camera moves.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
+				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guoxl.MouseLens;
+				PRODUCT_NAME = MouseLens;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		B257DB04C474F5C33648FFD5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E30A32B9DC04831A72455AD9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F851A943809553AFBF822BB6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guoxl.MouseLensTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MouseLens.app/Contents/MacOS/MouseLens";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9F781D61D8BF6A2D2C1DB4E1 /* Build configuration list for PBXProject "MouseLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B257DB04C474F5C33648FFD5 /* Debug */,
+				E30A32B9DC04831A72455AD9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B90A678CEF1100C8B3D781E3 /* Build configuration list for PBXNativeTarget "MouseLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				91EAECB912FD11D2F060FD82 /* Debug */,
+				4E64B8B0683F73F464FFE124 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CF7805EA80B660BCBD8DF217 /* Build configuration list for PBXNativeTarget "MouseLensTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				274C279C00609F92CD4136FE /* Debug */,
+				F851A943809553AFBF822BB6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A691DBC3E379F2F06E2421E7 /* Project object */;
+}

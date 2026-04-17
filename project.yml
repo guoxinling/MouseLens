@@ -1,0 +1,52 @@
+name: MouseLens
+options:
+  minimumXcodeGenVersion: 2.42.0
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    MACOSX_DEPLOYMENT_TARGET: 14.0
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+targets:
+  MouseLens:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Sources
+    resources:
+      - Resources
+    postBuildScripts:
+      - name: Stabilize local screen-recording identity
+        script: |
+          if [ -d "${TARGET_BUILD_DIR}/${WRAPPER_NAME}" ]; then
+            /usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier "com.guoxl.MouseLens"' "${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
+          fi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.guoxl.MouseLens
+        PRODUCT_NAME: MouseLens
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: MouseLens
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: MouseLens uses accessibility support to detect pointer activity for automatic camera moves.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: MouseLens can include microphone audio in recordings.
+        INFOPLIST_KEY_NSSystemAdministrationUsageDescription: MouseLens uses system permissions to record the screen and observe cursor activity.
+    scheme:
+      testTargets:
+        - MouseLensTests
+  MouseLensTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    hostApplication: MouseLens
+    sources:
+      - Tests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.guoxl.MouseLensTests
+    dependencies:
+      - target: MouseLens

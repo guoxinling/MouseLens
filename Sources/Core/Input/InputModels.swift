@@ -1,0 +1,117 @@
+import AppKit
+import Foundation
+
+struct NormalizedPoint: Codable, Hashable, Sendable {
+    let x: Double
+    let y: Double
+
+    static let center = NormalizedPoint(x: 0.5, y: 0.5)
+
+    var cgPoint: CGPoint {
+        CGPoint(x: x, y: y)
+    }
+}
+
+enum PointerEventType: String, Codable {
+    case move
+    case click
+    case scroll
+}
+
+struct PointerEvent: Identifiable, Codable, Equatable {
+    let id: UUID
+    let timestamp: TimeInterval
+    let location: NormalizedPoint
+    let type: PointerEventType
+
+    init(id: UUID = UUID(), timestamp: TimeInterval, location: NormalizedPoint, type: PointerEventType) {
+        self.id = id
+        self.timestamp = timestamp
+        self.location = location
+        self.type = type
+    }
+}
+
+final class PointerEventStore {
+    private var origin: Date?
+    private var events: [PointerEvent] = []
+    private let lock = NSLock()
+
+    func reset() {
+        lock.lock()
+        origin = Date()
+        events = []
+        lock.unlock()
+    }
+
+    func append(location: NormalizedPoint, type: PointerEventType) {
+        lock.lock()
+        defer { lock.unlock() }
+        if origin == nil {
+            origin = Date()
+        }
+        let base = origin ?? Date()
+        let timestamp = Date().timeIntervalSince(base)
+        events.append(PointerEvent(timestamp: timestamp, location: location, type: type))
+    }
+
+    func snapshot() -> [PointerEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
+
+@MainActor
+final class EventTapMonitor {
+    private let store: PointerEventStore
+    private var monitors: [Any] = []
+
+    init(store: PointerEventStore) {
+        self.store = store
+    }
+
+    func start() {
+        _ = stop()
+        store.reset()
+
+        let masks: [(NSEvent.EventTypeMask, PointerEventType)] = [
+            (.mouseMoved, .move),
+            (.leftMouseDragged, .move),
+            (.rightMouseDragged, .move),
+            (.leftMouseDown, .click),
+            (.rightMouseDown, .click),
+            (.scrollWheel, .scroll)
+        ]
+
+        for (mask, type) in masks {
+            if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+                self?.record(event: event, as: type)
+            }) {
+                monitors.append(monitor)
+            }
+        }
+    }
+
+    func stop() -> [PointerEvent] {
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitors.removeAll()
+        return store.snapshot()
+    }
+
+    private func record(event: NSEvent, as type: PointerEventType) {
+        let bounds = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
+            partialResult.union(screen.frame)
+        }
+        guard bounds.width > 0, bounds.height > 0 else { return }
+
+        let location = event.locationInWindow
+        let normalized = NormalizedPoint(
+            x: ((location.x - bounds.minX) / bounds.width).clamped(to: 0...1),
+            y: 1 - ((location.y - bounds.minY) / bounds.height).clamped(to: 0...1)
+        )
+        store.append(location: normalized, type: type)
+    }
+}

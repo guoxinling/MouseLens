@@ -2,8 +2,10 @@
 
 # Xcode build products and local caches
 .DerivedData*/
+.DerivedDataLocalTest/
 Build/
 BuildRelease/
+.LocalTestApp/
 *.app
 *.app.dSYM
 *.dSYM
@@ -18,3 +20,7 @@ xcuserdata/
 # Python or local tooling artifacts
 __pycache__/
 *.pyc
+
+# Local debug probes and transient investigation artifacts
+.swift-module-cache/
+.tmp_*

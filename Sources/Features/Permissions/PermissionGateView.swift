@@ -125,3 +125,53 @@ struct PermissionGateView: View {
         onRequest()
     }
 }
+
+private struct PermissionRow: View {
+    let label: String
+    let status: PermissionStatus
+    var required: Bool = true
+
+    var body: some View {
+        HStack {
+            Image(systemName: iconName)
+                .foregroundStyle(iconColor)
+
+            Text(label)
+
+            if !required {
+                Text("Optional")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.mutedText)
+            } else if status == .requiresRelaunch {
+                Text("Restart Needed")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Spacer()
+        }
+        .font(.system(size: 13, weight: .medium))
+    }
+
+    private var iconName: String {
+        switch status {
+        case .granted:
+            return "checkmark.circle.fill"
+        case .requiresRelaunch:
+            return "arrow.clockwise.circle.fill"
+        case .denied, .unknown:
+            return required ? "xmark.circle.fill" : "minus.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch status {
+        case .granted:
+            return .green
+        case .requiresRelaunch:
+            return .orange
+        case .denied, .unknown:
+            return required ? .orange : AppTheme.mutedText
+        }
+    }
+}

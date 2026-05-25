@@ -12,6 +12,7 @@ struct AppEnvironment {
     let hotkeyManager: HotkeyManager
     let windowController: AppWindowController
     let logger: Logger
+    let runtimeInfo: AppRuntimeInfo
 
     @MainActor
     static func live() -> AppEnvironment {
@@ -27,6 +28,7 @@ struct AppEnvironment {
         let hotkeyManager = HotkeyManager()
         let windowController = AppWindowController()
         let screenRecorder = ScreenRecorder(logger: logger)
+        let runtimeInfo = AppRuntimeInfo.current
 
         return AppEnvironment(
             preferencesStore: preferencesStore,
@@ -39,7 +41,28 @@ struct AppEnvironment {
             exportCoordinator: exportCoordinator,
             hotkeyManager: hotkeyManager,
             windowController: windowController,
-            logger: logger
+            logger: logger,
+            runtimeInfo: runtimeInfo
         )
+    }
+}
+
+struct AppRuntimeInfo {
+    static let canonicalLocalTestSuffix = "/.LocalTestApp/MouseLens.app"
+
+    let bundlePath: String
+
+    static var current: AppRuntimeInfo {
+        AppRuntimeInfo(bundlePath: Bundle.main.bundleURL.path)
+    }
+
+    var isCanonicalLocalTestApp: Bool {
+        bundlePath.hasSuffix(Self.canonicalLocalTestSuffix)
+    }
+
+    var displayBundlePath: String {
+        let homeDirectory = NSHomeDirectory()
+        guard bundlePath.hasPrefix(homeDirectory) else { return bundlePath }
+        return "~" + bundlePath.dropFirst(homeDirectory.count)
     }
 }

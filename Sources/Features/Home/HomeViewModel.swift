@@ -3,7 +3,14 @@ import Foundation
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    @Published var selectedCaptureTarget: CaptureTarget = .screen
+    @Published var selectedCaptureTarget: CaptureTarget = .screen {
+        didSet {
+            guard selectedCaptureTarget == .window else { return }
+            Task { [weak self] in
+                await self?.refreshWindowTargets()
+            }
+        }
+    }
     @Published var includeMicrophone = true {
         didSet {
             guard !isApplyingDefaults else { return }
@@ -27,6 +34,9 @@ final class HomeViewModel: ObservableObject {
     @Published var recordingState: RecordingState = .idle
     @Published var showingPermissions = false
     @Published var statusMessage = "Record a screen demo and let MouseLens build the camera motion."
+    @Published var selectedWindowTargetID: UInt32?
+    @Published private(set) var availableWindowTargets: [CaptureWindowOption] = []
+    @Published private(set) var isRefreshingWindowTargets = false
     @Published private(set) var completedProject: RecordingProject?
 
     private let environment: AppEnvironment
@@ -42,15 +52,38 @@ final class HomeViewModel: ObservableObject {
         environment.hotkeyManager.toggleShortcut.displayLabel
     }
 
+    var isCanonicalLocalTestApp: Bool {
+        environment.runtimeInfo.isCanonicalLocalTestApp
+    }
+
+    var runtimeBundlePath: String {
+        environment.runtimeInfo.displayBundlePath
+    }
+
     var menuBarPrimaryActionTitle: String {
         switch recordingState {
         case .idle:
             return "Start Recording"
         case .countdown:
             return "Cancel Countdown"
-        case .recording:
+        case .recording(let session):
+            if session.isPaused {
+                return "Stop Recording (Paused)"
+            }
             return "Stop Recording"
         }
+    }
+
+    var selectedWindowTarget: CaptureWindowOption? {
+        availableWindowTargets.first { $0.id == selectedWindowTargetID }
+    }
+
+    var selectedWindowTargetLabel: String {
+        if isRefreshingWindowTargets {
+            return "Loading Windows"
+        }
+
+        return selectedWindowTarget?.compactLabel ?? "Choose Window"
     }
 
     init(environment: AppEnvironment) {
@@ -99,7 +132,17 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        beginCountdown()
+        if selectedCaptureTarget == .window {
+            if selectedWindowTargetID == nil || selectedWindowTarget == nil {
+                await refreshWindowTargets(preservingCurrentSelection: selectedWindowTargetID != nil)
+            }
+            guard selectedWindowTargetID != nil else {
+                statusMessage = "No recordable window is selected. Open a window, refresh Window mode, then record again."
+                return
+            }
+        }
+
+        await beginCountdown()
     }
 
     func cancelCountdown() {
@@ -108,6 +151,7 @@ final class HomeViewModel: ObservableObject {
 
         guard case .countdown = recordingState else { return }
         recordingState = .idle
+        environment.windowController.restoreAfterCapture()
         statusMessage = "Recording countdown cancelled."
     }
 
@@ -117,18 +161,12 @@ final class HomeViewModel: ObservableObject {
 
         guard case .recording = recordingState else { return }
 
-        defer {
-            environment.windowController.restoreAfterCapture()
-            recordingState = .idle
-        }
-
         do {
             let session = try await environment.screenRecorder.stop()
             let events = environment.eventMonitor.stop()
             let normalizedEvents = normalize(events: events, for: session)
-            let fallbackEvents = normalizedEvents.isEmpty ? Self.demoEvents(duration: max(session.duration, 6.0)) : normalizedEvents
             let keyframes = environment.cameraPlanEngine.makePlan(
-                from: fallbackEvents,
+                from: normalizedEvents,
                 baseZoom: 1.0,
                 followStrength: 0.72,
                 clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
@@ -136,27 +174,62 @@ final class HomeViewModel: ObservableObject {
 
             let style = ProjectStyle(
                 aspectRatio: selectedAspectRatio,
-                background: .aurora,
-                cornerRadius: 26,
-                shadowRadius: 30,
+                background: .ocean,
+                cornerRadius: 10.35,
+                shadowRadius: 0,
                 followStrength: 0.72,
                 clickEmphasis: 0.54,
-                padding: 0.09
+                padding: 0.04
             )
 
             let project = try environment.projectStore.createProject(
                 from: session,
-                events: fallbackEvents,
+                events: normalizedEvents,
                 keyframes: keyframes,
                 style: style
             )
 
             loadRecentProjects()
-            statusMessage = "Project created. You can fine-tune the motion and export it now."
+            if normalizedEvents.isEmpty {
+                statusMessage = "Project created, but MouseLens did not capture pointer events for this take. Reconstructed cursor motion may be unavailable."
+            } else {
+                statusMessage = "Project created. You can fine-tune the motion and export it now."
+            }
+            recordingState = .idle
             completedProject = project
         } catch {
+            recordingState = .idle
+            environment.windowController.restoreAfterCapture()
             statusMessage = "Unable to finish recording: \(error.localizedDescription)"
         }
+    }
+
+    func toggleRecordingPause() {
+        guard case .recording(let session) = recordingState else { return }
+
+        if session.isPaused {
+            resumeRecording()
+        } else {
+            pauseRecording()
+        }
+    }
+
+    func pauseRecording() {
+        guard case .recording(let session) = recordingState, !session.isPaused else { return }
+
+        environment.screenRecorder.pause()
+        environment.eventMonitor.pause()
+        recordingState = .recording(session.pausing())
+        statusMessage = "Recording paused. Use the floating toolbar to resume or finish."
+    }
+
+    func resumeRecording() {
+        guard case .recording(let session) = recordingState, session.isPaused else { return }
+
+        environment.screenRecorder.resume()
+        environment.eventMonitor.resume()
+        recordingState = .recording(session.resuming())
+        statusMessage = "Recording resumed. MouseLens is tracking pointer activity."
     }
 
     func consumeCompletedProject() {
@@ -166,6 +239,51 @@ final class HomeViewModel: ObservableObject {
     func openRecent(project: RecordingProject) -> RecordingProject {
         statusMessage = "Reopened \(project.name)."
         return project
+    }
+
+    func refreshWindowTargets(preservingCurrentSelection: Bool = false) async {
+        guard recordingState == .idle, selectedCaptureTarget == .window else { return }
+
+        isRefreshingWindowTargets = true
+        defer { isRefreshingWindowTargets = false }
+
+        let previousTargets = availableWindowTargets
+        let previousTargetID = selectedWindowTargetID
+
+        do {
+            let targets = try await environment.screenRecorder.availableWindowTargets()
+            availableWindowTargets = targets
+
+            if let selectedWindowTargetID,
+               targets.contains(where: { $0.id == selectedWindowTargetID }) {
+                statusMessage = "Window target: \(selectedWindowTarget?.displayLabel ?? "Selected window")."
+            } else if preservingCurrentSelection, previousTargetID != nil {
+                availableWindowTargets = targets.isEmpty ? previousTargets : targets
+                selectedWindowTargetID = previousTargetID
+                statusMessage = "Window target preserved for recording."
+            } else {
+                selectedWindowTargetID = targets.first?.id
+                if let selectedWindowTarget {
+                    statusMessage = "Window target: \(selectedWindowTarget.displayLabel)."
+                } else {
+                    statusMessage = "No recordable windows found. Open a window, then refresh Window mode."
+                }
+            }
+        } catch {
+            if preservingCurrentSelection, previousTargetID != nil {
+                availableWindowTargets = previousTargets
+                selectedWindowTargetID = previousTargetID
+            } else {
+                availableWindowTargets = []
+                selectedWindowTargetID = nil
+            }
+            statusMessage = "Unable to list windows: \(error.localizedDescription)"
+        }
+    }
+
+    func selectWindowTarget(_ target: CaptureWindowOption) {
+        selectedWindowTargetID = target.id
+        statusMessage = "Window target: \(target.displayLabel)."
     }
 
     func handleRecordingToggleHotkey() async {
@@ -183,7 +301,7 @@ final class HomeViewModel: ObservableObject {
         permissions.recordingReady(requiresMicrophone: includeMicrophone)
     }
 
-    private func beginCountdown() {
+    private func beginCountdown() async {
         countdownTask?.cancel()
         completedProject = nil
         showingPermissions = false
@@ -196,37 +314,50 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        statusMessage = "MouseLens will hide its window and start recording in \(countdownSeconds) seconds. Press \(recordingShortcutHint) to cancel."
+        recordingState = .countdown(secondsRemaining: countdownSeconds)
+        statusMessage = countdownStatusMessage(for: countdownSeconds)
 
         countdownTask = Task { [weak self] in
             guard let self else { return }
 
-            for remaining in stride(from: countdownSeconds, through: 1, by: -1) {
-                guard !Task.isCancelled else { return }
-                recordingState = .countdown(secondsRemaining: remaining)
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            if countdownSeconds > 1 {
+                for remaining in stride(from: countdownSeconds - 1, through: 1, by: -1) {
+                    guard !Task.isCancelled else { return }
+                    recordingState = .countdown(secondsRemaining: remaining)
+                    statusMessage = countdownStatusMessage(for: remaining)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
             }
 
             guard !Task.isCancelled else { return }
             await startCaptureNow()
         }
+
+        await Task.yield()
+        await environment.windowController.prepareForCapture()
+    }
+
+    private func countdownStatusMessage(for secondsRemaining: Int) -> String {
+        "Recording starts in \(secondsRemaining) second\(secondsRemaining == 1 ? "" : "s"). Press \(recordingShortcutHint) to cancel."
     }
 
     private func startCaptureNow() async {
-        if environment.preferencesStore.hideWindowBeforeCapture {
-            await environment.windowController.prepareForCapture()
-        }
+        await environment.windowController.prepareForCapture()
 
         do {
             let configuration = ScreenRecorderConfiguration(
                 target: selectedCaptureTarget,
                 includeMicrophone: includeMicrophone,
-                includeSystemAudio: includeSystemAudio
+                includeSystemAudio: includeSystemAudio,
+                preferredWindowID: selectedCaptureTarget == .window ? selectedWindowTargetID : nil
             )
-            _ = try await environment.screenRecorder.start(configuration: configuration)
+            let session = try await environment.screenRecorder.start(configuration: configuration)
             environment.eventMonitor.start()
-            recordingState = .recording(startedAt: Date())
-            statusMessage = "Recording started. MouseLens is tracking pointer activity. Press \(recordingShortcutHint) to stop from anywhere."
+            recordingState = .recording(RecordingSessionState(startedAt: session.startedAt))
+            statusMessage = "Recording started. Use the floating toolbar to pause or finish."
         } catch {
             environment.windowController.restoreAfterCapture()
             environment.permissionManager.markScreenRecordingCaptureAttempt()
@@ -280,13 +411,39 @@ final class HomeViewModel: ObservableObject {
             return events
         }
 
+        return Self.normalizedPointerEvents(
+            events,
+            coordinateSpace: coordinateSpace,
+            target: session.configuration.target
+        )
+    }
+
+    static func normalizedPointerEvents(
+        _ events: [PointerEvent],
+        coordinateSpace: CaptureCoordinateSpace,
+        target: CaptureTarget
+    ) -> [PointerEvent] {
         let viewport = coordinateSpace.viewport.rect
         let screenBounds = coordinateSpace.screenBounds.rect
         guard screenBounds.width > 0, screenBounds.height > 0, viewport.width > 0, viewport.height > 0 else {
             return events
         }
 
-        let filtered = events.compactMap { event -> PointerEvent? in
+        switch target {
+        case .screen:
+            let normalizedEvents = normalizedPointerEvents(events, screenBounds: screenBounds, viewport: viewport)
+            return normalizedEvents.isEmpty ? events : normalizedEvents
+        case .window:
+            return normalizedWindowPointerEvents(events, screenBounds: screenBounds, viewport: viewport)
+        }
+    }
+
+    private static func normalizedPointerEvents(
+        _ events: [PointerEvent],
+        screenBounds: CGRect,
+        viewport: CGRect
+    ) -> [PointerEvent] {
+        events.compactMap { event -> PointerEvent? in
             let globalX = screenBounds.minX + (event.location.x * screenBounds.width)
             let globalY = screenBounds.minY + ((1 - event.location.y) * screenBounds.height)
             let globalPoint = CGPoint(x: globalX, y: globalY)
@@ -303,28 +460,48 @@ final class HomeViewModel: ObservableObject {
                 type: event.type
             )
         }
-
-        return filtered.isEmpty ? events : filtered
     }
 
-    private static func demoEvents(duration: TimeInterval) -> [PointerEvent] {
-        let points: [NormalizedPoint] = [
-            .init(x: 0.18, y: 0.28),
-            .init(x: 0.39, y: 0.36),
-            .init(x: 0.61, y: 0.41),
-            .init(x: 0.72, y: 0.22),
-            .init(x: 0.54, y: 0.64),
-            .init(x: 0.32, y: 0.74),
-            .init(x: 0.78, y: 0.70)
-        ]
-
-        return points.enumerated().flatMap { index, point in
-            let t = duration * Double(index) / Double(max(points.count - 1, 1))
-            let move = PointerEvent(timestamp: t, location: point, type: .move)
-            if index.isMultiple(of: 2) {
-                return [move, PointerEvent(timestamp: min(t + 0.15, duration), location: point, type: .click)]
-            }
-            return [move]
+    private static func normalizedWindowPointerEvents(
+        _ events: [PointerEvent],
+        screenBounds: CGRect,
+        viewport: CGRect
+    ) -> [PointerEvent] {
+        let alternateViewport = flippedViewport(viewport, in: screenBounds)
+        let candidates = [viewport, alternateViewport]
+        let scoredCandidates = candidates.map { candidate in
+            (
+                viewport: candidate,
+                events: normalizedPointerEvents(events, screenBounds: screenBounds, viewport: candidate)
+            )
         }
+
+        let best = scoredCandidates.max { lhs, rhs in
+            if lhs.events.count != rhs.events.count {
+                return lhs.events.count < rhs.events.count
+            }
+            return averageDistanceFromCenter(lhs.events) > averageDistanceFromCenter(rhs.events)
+        }
+
+        return best?.events ?? []
+    }
+
+    private static func flippedViewport(_ viewport: CGRect, in screenBounds: CGRect) -> CGRect {
+        CGRect(
+            x: viewport.minX,
+            y: screenBounds.minY + screenBounds.height - (viewport.minY - screenBounds.minY) - viewport.height,
+            width: viewport.width,
+            height: viewport.height
+        )
+    }
+
+    private static func averageDistanceFromCenter(_ events: [PointerEvent]) -> Double {
+        guard !events.isEmpty else { return .greatestFiniteMagnitude }
+        let total = events.reduce(0.0) { partialResult, event in
+            let dx = event.location.x - 0.5
+            let dy = event.location.y - 0.5
+            return partialResult + sqrt((dx * dx) + (dy * dy))
+        }
+        return total / Double(events.count)
     }
 }

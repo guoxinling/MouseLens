@@ -34,14 +34,39 @@ struct PointerEvent: Identifiable, Codable, Equatable {
 
 final class PointerEventStore {
     private var origin: Date?
+    private var pausedAt: Date?
+    private var accumulatedPausedDuration: TimeInterval = 0
     private var events: [PointerEvent] = []
     private let lock = NSLock()
 
     func reset() {
         lock.lock()
         origin = Date()
+        pausedAt = nil
+        accumulatedPausedDuration = 0
         events = []
         lock.unlock()
+    }
+
+    func pause() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if origin == nil {
+            origin = Date()
+        }
+
+        guard pausedAt == nil else { return }
+        pausedAt = Date()
+    }
+
+    func resume() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let pausedAt else { return }
+        accumulatedPausedDuration += max(0, Date().timeIntervalSince(pausedAt))
+        self.pausedAt = nil
     }
 
     func append(location: NormalizedPoint, type: PointerEventType) {
@@ -50,8 +75,10 @@ final class PointerEventStore {
         if origin == nil {
             origin = Date()
         }
+        guard pausedAt == nil else { return }
+
         let base = origin ?? Date()
-        let timestamp = Date().timeIntervalSince(base)
+        let timestamp = max(0, Date().timeIntervalSince(base) - accumulatedPausedDuration)
         events.append(PointerEvent(timestamp: timestamp, location: location, type: type))
     }
 
@@ -101,17 +128,32 @@ final class EventTapMonitor {
         return store.snapshot()
     }
 
+    func pause() {
+        store.pause()
+    }
+
+    func resume() {
+        store.resume()
+    }
+
     private func record(event: NSEvent, as type: PointerEventType) {
-        let bounds = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
+        let bounds = Self.activeScreenBounds()
+        guard let normalized = Self.normalizedLocation(for: NSEvent.mouseLocation, in: bounds) else { return }
+        store.append(location: normalized, type: type)
+    }
+
+    static func activeScreenBounds() -> CGRect {
+        NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
             partialResult.union(screen.frame)
         }
-        guard bounds.width > 0, bounds.height > 0 else { return }
+    }
 
-        let location = event.locationInWindow
-        let normalized = NormalizedPoint(
-            x: ((location.x - bounds.minX) / bounds.width).clamped(to: 0...1),
-            y: 1 - ((location.y - bounds.minY) / bounds.height).clamped(to: 0...1)
+    static func normalizedLocation(for globalLocation: CGPoint, in bounds: CGRect) -> NormalizedPoint? {
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+
+        return NormalizedPoint(
+            x: ((globalLocation.x - bounds.minX) / bounds.width).clamped(to: 0...1),
+            y: 1 - ((globalLocation.y - bounds.minY) / bounds.height).clamped(to: 0...1)
         )
-        store.append(location: normalized, type: type)
     }
 }

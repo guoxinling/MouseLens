@@ -28,6 +28,7 @@
 		840987137B9ACEDFC5C4FD7D /* RenderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9292717184450E66935639A4 /* RenderModels.swift */; };
 		8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */; };
 		99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */; };
+		9C0D7DA6213547B4986828A5 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 5DAE88951F914DBDB3DC6E5D /* ObjCExceptionCatcher.m */; };
 		A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E212BAF15684F714399474C /* CameraPlanning.swift */; };
 		B1E4614D6011123A87634B30 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */; };
 		B2864C03D2FD058647EDA2B9 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490A410508B7A8D23900CB7E /* ExportSheetView.swift */; };
@@ -65,6 +66,7 @@
 		4E212BAF15684F714399474C /* CameraPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanning.swift; sourceTree = "<group>"; };
 		5507A3B2A37F44792C466A1F /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		57C447F994700574E687752A /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		5DAE88951F914DBDB3DC6E5D /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ObjCExceptionCatcher.m; sourceTree = "<group>"; };
 		5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCropPlannerTests.swift; sourceTree = "<group>"; };
 		6004F526659EF95F3FF4AE36 /* PermissionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsViewModel.swift; sourceTree = "<group>"; };
 		6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
@@ -344,6 +346,7 @@
 			isa = PBXGroup;
 			children = (
 				2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */,
+				5DAE88951F914DBDB3DC6E5D /* ObjCExceptionCatcher.m */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -443,7 +446,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -d \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" ]; then\n  /usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier \"com.guoxl.MouseLens\"' \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nfi\n";
+			shellScript = "APP_PATH=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nif [ ! -d \"$APP_PATH\" ]; then\n  exit 0\nfi\n\nif [ -d \"$APP_PATH/Contents/PlugIns\" ]; then\n  exit 0\nfi\n\n/usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier \"com.guoxl.MouseLens\"' \"$APP_PATH\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -482,6 +485,7 @@
 				35933D9AD6426C73850DA380 /* InputModels.swift in Sources */,
 				6B9360A5539EE2CA27512CB8 /* MetricSlider.swift in Sources */,
 				71B98F73FABE1DF447FE461B /* MouseLensApp.swift in Sources */,
+				9C0D7DA6213547B4986828A5 /* ObjCExceptionCatcher.m in Sources */,
 				01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */,
 				CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */,
 				644B6B00A9321C433514ADB9 /* PreviewCanvasView.swift in Sources */,

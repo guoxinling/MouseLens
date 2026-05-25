@@ -5,42 +5,17 @@ struct HomeView: View {
     let onProjectReady: (RecordingProject) -> Void
 
     var body: some View {
-        HStack(spacing: 28) {
-            VStack(alignment: .leading, spacing: 24) {
-                hero
-                captureCard
-                recentProjectsCard
-            }
-            .frame(maxWidth: 420, alignment: .topLeading)
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                recordingToolbar(isCompact: geometry.size.width < 1240)
 
-            VStack(spacing: 24) {
-                featureBoard
+                Divider()
+                    .overlay(AppTheme.panelBorder.opacity(0.45))
 
-                switch viewModel.recordingState {
-                case .idle:
-                    idleBoard
-                case .countdown, .recording:
-                    RecordingHUDView(
-                        state: viewModel.recordingState,
-                        shortcutHint: viewModel.recordingShortcutHint,
-                        onPrimaryAction: {
-                            Task {
-                                switch viewModel.recordingState {
-                                case .countdown:
-                                    viewModel.cancelCountdown()
-                                case .recording:
-                                    await viewModel.stopRecording()
-                                case .idle:
-                                    await viewModel.startRecording()
-                                }
-                            }
-                        }
-                    )
-                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(32)
         .sheet(isPresented: $viewModel.showingPermissions) {
             PermissionGateView(
                 viewModel: PermissionsViewModel(permissionManager: viewModel.permissionManager),
@@ -55,268 +30,308 @@ struct HomeView: View {
         }
         .onAppear {
             viewModel.refreshPermissions()
-            viewModel.loadRecentProjects()
         }
     }
 
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Text("MouseLens")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-
-                Spacer()
-
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(.bordered)
-            }
-            Text("Record a walkthrough. Get the camera work for free.")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(viewModel.statusMessage)
-                .font(.system(size: 13))
-                .foregroundStyle(AppTheme.mutedText)
-
-            if viewModel.permissions.needsScreenRecordingRelaunch {
-                Text("Screen Recording was enabled, but MouseLens must be quit and reopened before macOS will allow capture.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-
-            if !viewModel.permissions.accessibility.isGranted {
-                Text("Accessibility is optional in this build. Recording can continue, but cursor-follow quality may be reduced.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    private var captureCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingRow("Capture Mode") {
-                Picker("Capture Target", selection: $viewModel.selectedCaptureTarget) {
-                    ForEach(CaptureTarget.allCases, id: \.self) { option in
-                        Text(option.label).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            SettingRow("Audio") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Microphone", isOn: $viewModel.includeMicrophone)
-                    Toggle("System Audio", isOn: $viewModel.includeSystemAudio)
-                }
-                .toggleStyle(.switch)
-            }
-
-            SettingRow("Output") {
-                Picker("Aspect Ratio", selection: $viewModel.selectedAspectRatio) {
-                    ForEach(ProjectAspectRatio.allCases, id: \.self) { ratio in
-                        Text(ratio.label).tag(ratio)
-                    }
-                }
-            }
-
-            HStack(spacing: 12) {
-                Button {
-                    Task { await viewModel.startRecording() }
-                } label: {
-                    Label(startButtonTitle, systemImage: startButtonIcon)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(viewModel.recordingState != .idle)
-
-                Button("Refresh Permissions") {
-                    viewModel.refreshPermissions()
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.recordingState != .idle)
-            }
-
-            Text("Shortcut: \(viewModel.recordingShortcutHint) to start, cancel, or stop from anywhere.")
-                .font(.system(size: 12))
-                .foregroundStyle(AppTheme.mutedText)
-
-            if viewModel.permissions.needsScreenRecordingRelaunch {
-                Text("Screen Recording is waiting on an app relaunch. Quit MouseLens, reopen it, then try again.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-
-            permissionSummary
-        }
-        .cardStyle()
-    }
-
-    private var startButtonTitle: String {
-        viewModel.permissions.needsScreenRecordingRelaunch ? "Reopen Required" : "Start Recording"
-    }
-
-    private var startButtonIcon: String {
-        viewModel.permissions.needsScreenRecordingRelaunch ? "arrow.clockwise.circle.fill" : "record.circle.fill"
-    }
-
-    private var permissionSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Permissions")
-                .font(.headline)
-            PermissionRow(label: "Screen Recording", status: viewModel.permissions.screenRecording)
-            PermissionRow(label: "Microphone", status: viewModel.permissions.microphone, required: viewModel.includeMicrophone)
-            PermissionRow(label: "Accessibility", status: viewModel.permissions.accessibility, required: false)
-        }
-    }
-
-    private var recentProjectsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Projects")
-                .font(.headline)
-
-            if viewModel.recentProjects.isEmpty {
-                Text("No local projects yet. Your first recording will appear here.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppTheme.mutedText)
+    private func recordingToolbar(isCompact: Bool) -> some View {
+        Group {
+            if isCompact {
+                recordingToolbarContent(isCompact: true)
             } else {
-                ForEach(viewModel.recentProjects) { project in
-                    Button {
-                        onProjectReady(viewModel.openRecent(project: project))
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(project.name)
-                                Text(project.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(project.style.aspectRatio.label)
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.accent)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(10)
-                    .background(AppTheme.panelBorder.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                ViewThatFits(in: .horizontal) {
+                    recordingToolbarContent(isCompact: false)
+                    recordingToolbarContent(isCompact: true)
                 }
             }
         }
-        .cardStyle()
+        .padding(.leading, 34)
+        .padding(.trailing, 24)
+        .padding(.top, 24)
+        .padding(.bottom, 14)
+        .background(Color.white.opacity(0.035))
     }
 
-    private var featureBoard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("MVP Focus")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(AppTheme.accent)
-            Text("A tiny recording workflow, not a traditional editor.")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-            Text("MouseLens stays intentionally narrow: capture the screen, track the pointer, generate polished camera motion, and export fast.")
-                .foregroundStyle(AppTheme.mutedText)
+    private func recordingToolbarContent(isCompact: Bool) -> some View {
+        HStack(spacing: isCompact ? 10 : 14) {
+            toolbarIdentity(isCompact: isCompact)
+                .frame(width: isCompact ? 176 : 190, alignment: .leading)
 
-            HStack(spacing: 16) {
-                FeaturePill(title: "Local-first", subtitle: "No cloud required")
-                FeaturePill(title: "Auto motion", subtitle: "Cursor + click driven")
-                FeaturePill(title: "Fast export", subtitle: "Real MP4 compositing")
+            captureTargetControl(isCompact: isCompact)
+
+            if viewModel.selectedCaptureTarget == .window {
+                windowTargetControl(isCompact: isCompact)
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(28)
-        .background(
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(AppTheme.heroGradient)
-        )
-    }
 
-    private var idleBoard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Ready to record")
-                .font(.title2.bold())
-            Text("When recording starts, MouseLens will keep a raw session, collect pointer activity, and convert it into a reusable motion plan.")
-                .foregroundStyle(AppTheme.mutedText)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Current defaults")
-                    .font(.headline)
-                Text("• \(viewModel.selectedCaptureTarget.label)")
-                Text("• \(viewModel.selectedAspectRatio.label)")
-                Text("• Microphone \(viewModel.includeMicrophone ? "on" : "off")")
-                Text("• System audio \(viewModel.includeSystemAudio ? "on" : "off")")
+            ToolbarToggleButton(
+                title: "Microphone",
+                systemImage: viewModel.includeMicrophone ? "mic.fill" : "mic.slash.fill",
+                isOn: viewModel.includeMicrophone
+            ) {
+                viewModel.includeMicrophone.toggle()
             }
-            .font(.system(size: 14))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(28)
-        .cardStyle()
-    }
-}
+            .disabled(viewModel.recordingState != .idle)
 
-struct PermissionRow: View {
-    let label: String
-    let status: PermissionStatus
-    var required: Bool = true
+            ToolbarToggleButton(
+                title: "System Audio",
+                systemImage: viewModel.includeSystemAudio ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                isOn: viewModel.includeSystemAudio
+            ) {
+                viewModel.includeSystemAudio.toggle()
+            }
+            .disabled(viewModel.recordingState != .idle)
 
-    var body: some View {
-        HStack {
-            Image(systemName: iconName)
-                .foregroundStyle(iconColor)
-            Text(label)
-            if !required {
-                Text("Optional")
-                    .font(.caption)
+            aspectRatioControl(isCompact: isCompact)
+
+            Spacer(minLength: isCompact ? 8 : 14)
+
+            Button {
+                viewModel.refreshPermissions()
+            } label: {
+                Image(systemName: permissionIconName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(permissionIconColor)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .help("Refresh permissions")
+            .disabled(viewModel.recordingState != .idle)
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(AppTheme.mutedText)
-            } else if status == .requiresRelaunch {
-                Text("Restart Needed")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .frame(width: 34, height: 34)
             }
-            Spacer()
+            .buttonStyle(.plain)
+            .help("Settings")
+
+            Button {
+                Task { await handleRecordingToolbarAction() }
+            } label: {
+                Label(toolbarActionTitle, systemImage: toolbarActionIcon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: isCompact ? 94 : 116)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(viewModel.permissions.needsScreenRecordingRelaunch)
         }
-        .font(.system(size: 13, weight: .medium))
+        .frame(maxWidth: .infinity)
     }
 
-    private var iconName: String {
-        switch status {
-        case .granted:
-            return "checkmark.circle.fill"
-        case .requiresRelaunch:
-            return "arrow.clockwise.circle.fill"
-        case .denied, .unknown:
-            return required ? "xmark.circle.fill" : "minus.circle"
+    private func toolbarIdentity(isCompact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("MouseLens")
+                .font(.system(size: isCompact ? 18 : 20, weight: .bold, design: .rounded))
+                .lineLimit(1)
+
+            if !isCompact {
+                Text(toolbarSubtitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(toolbarSubtitleColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
     }
 
-    private var iconColor: Color {
-        switch status {
-        case .granted:
-            return .green
-        case .requiresRelaunch:
-            return .orange
-        case .denied, .unknown:
-            return required ? .orange : AppTheme.mutedText
+    private func captureTargetControl(isCompact: Bool) -> some View {
+        HStack(spacing: 10) {
+            if !isCompact {
+                Text("Capture Target")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: 112, alignment: .leading)
+                    .layoutPriority(3)
+            }
+
+            Picker("Capture Target", selection: $viewModel.selectedCaptureTarget) {
+                ForEach(CaptureTarget.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: isCompact ? 170 : 214)
+            .disabled(viewModel.recordingState != .idle)
+        }
+    }
+
+    private func windowTargetControl(isCompact: Bool) -> some View {
+        Menu {
+            Button {
+                Task { await viewModel.refreshWindowTargets() }
+            } label: {
+                Label("Refresh Windows", systemImage: "arrow.clockwise")
+            }
+
+            Divider()
+
+            if viewModel.availableWindowTargets.isEmpty {
+                Button("No recordable windows") {}
+                    .disabled(true)
+            } else {
+                ForEach(viewModel.availableWindowTargets) { target in
+                    Button {
+                        viewModel.selectWindowTarget(target)
+                    } label: {
+                        Label(
+                            target.displayLabel,
+                            systemImage: target.id == viewModel.selectedWindowTargetID ? "checkmark" : "macwindow"
+                        )
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "macwindow")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Text(viewModel.selectedWindowTargetLabel)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+
+                if viewModel.isRefreshingWindowTargets {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+            }
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 10)
+            .frame(width: isCompact ? 152 : 188, height: 40)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.075))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .disabled(viewModel.recordingState != .idle)
+        .help("Choose window to record")
+    }
+
+    private func aspectRatioControl(isCompact: Bool) -> some View {
+        HStack(spacing: 10) {
+            if !isCompact {
+                Text("Aspect Ratio")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: 98, alignment: .leading)
+                    .layoutPriority(3)
+            }
+
+            Picker("Aspect Ratio", selection: $viewModel.selectedAspectRatio) {
+                ForEach(ProjectAspectRatio.allCases, id: \.self) { ratio in
+                    Text(ratio.label).tag(ratio)
+                }
+            }
+            .labelsHidden()
+            .frame(width: isCompact ? 72 : 78)
+            .disabled(viewModel.recordingState != .idle)
+        }
+    }
+
+    private var toolbarSubtitle: String {
+        if !viewModel.isCanonicalLocalTestApp {
+            return "Not running canonical local test app."
+        }
+
+        return viewModel.statusMessage
+    }
+
+    private var toolbarSubtitleColor: Color {
+        viewModel.isCanonicalLocalTestApp ? AppTheme.mutedText : .orange
+    }
+
+    private var toolbarActionTitle: String {
+        switch viewModel.recordingState {
+        case .idle:
+            return viewModel.permissions.needsScreenRecordingRelaunch ? "Reopen" : "Record"
+        case .countdown:
+            return "Cancel"
+        case .recording:
+            return "Stop"
+        }
+    }
+
+    private var toolbarActionIcon: String {
+        switch viewModel.recordingState {
+        case .idle:
+            return viewModel.permissions.needsScreenRecordingRelaunch ? "arrow.clockwise.circle.fill" : "record.circle.fill"
+        case .countdown:
+            return "xmark.circle.fill"
+        case .recording:
+            return "stop.circle.fill"
+        }
+    }
+
+    private var permissionIconName: String {
+        if viewModel.permissions.needsScreenRecordingRelaunch {
+            return "arrow.clockwise.shield"
+        }
+
+        return viewModel.permissions.recordingReady(requiresMicrophone: viewModel.includeMicrophone)
+            ? "checkmark.shield"
+            : "exclamationmark.shield"
+    }
+
+    private var permissionIconColor: Color {
+        viewModel.permissions.recordingReady(requiresMicrophone: viewModel.includeMicrophone)
+            ? AppTheme.mutedText
+            : .orange
+    }
+
+    private func handleRecordingToolbarAction() async {
+        switch viewModel.recordingState {
+        case .idle:
+            await viewModel.startRecording()
+        case .countdown:
+            viewModel.cancelCountdown()
+        case .recording:
+            await viewModel.stopRecording()
         }
     }
 }
 
-private struct FeaturePill: View {
+private struct ToolbarToggleButton: View {
     let title: String
-    let subtitle: String
+    let systemImage: String
+    let isOn: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline)
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(AppTheme.mutedText)
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 40)
+                .foregroundStyle(isOn ? .white : AppTheme.mutedText)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isOn ? AppTheme.accent.opacity(0.95) : Color.white.opacity(0.075))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(isOn ? 0.26 : 0.12), lineWidth: 1)
+                )
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .buttonStyle(.plain)
+        .help(title)
     }
 }

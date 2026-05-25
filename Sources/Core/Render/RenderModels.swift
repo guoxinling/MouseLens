@@ -48,6 +48,7 @@ enum ExportPreset: String, CaseIterable {
 
 enum VideoRendererError: LocalizedError {
     case missingSourceVideo
+    case legacySourceRequiresRecapture
     case unableToCreateWriter
     case unableToCreatePixelBuffer
     case unableToCreateContext
@@ -59,6 +60,8 @@ enum VideoRendererError: LocalizedError {
         switch self {
         case .missingSourceVideo:
             "MouseLens could not find the raw recording for export."
+        case .legacySourceRequiresRecapture:
+            "This recording came from an older capture pipeline that MouseLens can preview but cannot reliably process for export. Please record it again in the latest build and export the new clip."
         case .unableToCreateWriter:
             "MouseLens could not create a video writer."
         case .unableToCreatePixelBuffer:
@@ -81,6 +84,34 @@ struct FrameSnapshot: Equatable {
     let emphasis: CameraKeyframe.EmphasisKind
 }
 
+struct PointerSnapshot: Equatable {
+    let rawLocation: NormalizedPoint
+    let location: NormalizedPoint
+    let clickLocation: NormalizedPoint?
+    let clickProgress: Double
+
+    var isClickActive: Bool {
+        clickProgress > 0.001
+    }
+}
+
+enum PointerSmoothingMode {
+    case smoothed
+    case raw
+}
+
+enum CursorGeometry {
+    static let templateSize = CGSize(width: 44, height: 44)
+    static let hotspot = CGPoint(x: 5, y: 5)
+
+    static func origin(forTip tip: CGPoint, scale: CGFloat) -> CGPoint {
+        CGPoint(
+            x: (tip.x / max(scale, 0.0001)) - hotspot.x,
+            y: (tip.y / max(scale, 0.0001)) - hotspot.y
+        )
+    }
+}
+
 protocol ProjectPreviewRendering {
     @MainActor
     func makePreviewImage(
@@ -88,6 +119,128 @@ protocol ProjectPreviewRendering {
         preset: ExportPreset,
         timestamp: TimeInterval
     ) async throws -> NSImage?
+
+    @MainActor
+    func renderPreviewVideo(
+        for project: RecordingProject,
+        preset: ExportPreset,
+        destinationURL: URL
+    ) async throws -> URL
+}
+
+struct PointerTimeline {
+    private let clickHighlightDuration: TimeInterval = 0.26
+    private let smoothingWindow: TimeInterval = 0.13
+    private let maximumSmoothingDistance = 0.042
+
+    func snapshot(
+        at timestamp: TimeInterval,
+        from events: [PointerEvent],
+        smoothing: PointerSmoothingMode = .smoothed
+    ) -> PointerSnapshot? {
+        let sorted = events.sorted { $0.timestamp < $1.timestamp }
+        guard !sorted.isEmpty else { return nil }
+
+        let rawLocation = interpolatedLocation(at: timestamp, from: sorted)
+        let click = latestClick(at: timestamp, from: sorted)
+        let clickProgress = clickProgress(at: timestamp, click: click)
+        let location: NormalizedPoint
+        switch smoothing {
+        case .smoothed:
+            location = smoothedLocation(
+                rawLocation: rawLocation,
+                timestamp: timestamp,
+                events: sorted,
+                activeClick: click
+            )
+        case .raw:
+            location = rawLocation
+        }
+
+        return PointerSnapshot(
+            rawLocation: rawLocation,
+            location: location,
+            clickLocation: clickProgress > 0 ? click?.location : nil,
+            clickProgress: clickProgress
+        )
+    }
+
+    private func interpolatedLocation(at timestamp: TimeInterval, from events: [PointerEvent]) -> NormalizedPoint {
+        guard let first = events.first else { return .center }
+
+        if timestamp <= first.timestamp {
+            return first.location
+        }
+
+        guard let last = events.last else {
+            return first.location
+        }
+
+        if timestamp >= last.timestamp {
+            return last.location
+        }
+
+        guard let upperIndex = events.firstIndex(where: { $0.timestamp >= timestamp }), upperIndex > 0 else {
+            return last.location
+        }
+
+        let lower = events[upperIndex - 1]
+        let upper = events[upperIndex]
+        let span = max(upper.timestamp - lower.timestamp, 0.0001)
+        let progress = ((timestamp - lower.timestamp) / span).clamped(to: 0...1)
+        return NormalizedPoint(
+            x: lower.location.x + ((upper.location.x - lower.location.x) * progress),
+            y: lower.location.y + ((upper.location.y - lower.location.y) * progress)
+        )
+    }
+
+    private func smoothedLocation(
+        rawLocation: NormalizedPoint,
+        timestamp: TimeInterval,
+        events: [PointerEvent],
+        activeClick: PointerEvent?
+    ) -> NormalizedPoint {
+        if let activeClick, abs(timestamp - activeClick.timestamp) <= 0.001 {
+            return activeClick.location
+        }
+
+        var weightedX = rawLocation.x * 1.8
+        var weightedY = rawLocation.y * 1.8
+        var totalWeight = 1.8
+
+        for event in events where event.type != .click {
+            let distance = abs(event.timestamp - timestamp)
+            guard distance <= smoothingWindow else { continue }
+
+            let normalizedDistance = (distance / smoothingWindow).clamped(to: 0...1)
+            let weight = pow(1 - normalizedDistance, 2)
+            weightedX += event.location.x * weight
+            weightedY += event.location.y * weight
+            totalWeight += weight
+        }
+
+        let averaged = NormalizedPoint(
+            x: (weightedX / max(totalWeight, 0.0001)).clamped(to: 0...1),
+            y: (weightedY / max(totalWeight, 0.0001)).clamped(to: 0...1)
+        )
+        return rawLocation.limitedToward(averaged, maxDistance: maximumSmoothingDistance)
+    }
+
+    private func latestClick(at timestamp: TimeInterval, from events: [PointerEvent]) -> PointerEvent? {
+        events.last { $0.type == .click && $0.timestamp <= timestamp }
+    }
+
+    private func clickProgress(at timestamp: TimeInterval, click: PointerEvent?) -> Double {
+        guard let click else { return 0 }
+
+        let delta = timestamp - click.timestamp
+        guard delta <= clickHighlightDuration else {
+            return 0
+        }
+
+        let progress = 1 - (delta / clickHighlightDuration)
+        return pow(progress.clamped(to: 0...1), 1.15)
+    }
 }
 
 struct FrameComposer {
@@ -125,6 +278,64 @@ struct FrameComposer {
         let emphasis: CameraKeyframe.EmphasisKind = (progress < 0.5) ? lower.emphasis : upper.emphasis
         return FrameSnapshot(focus: focus, zoom: zoom, emphasis: emphasis)
     }
+
+    func snapshot(
+        at timestamp: TimeInterval,
+        from keyframes: [CameraKeyframe],
+        manualZoomSegments: [ManualZoomSegment]
+    ) -> FrameSnapshot {
+        let baseSnapshot = snapshot(at: timestamp, from: keyframes)
+        guard let segment = activeManualZoomSegment(at: timestamp, in: manualZoomSegments) else {
+            return baseSnapshot
+        }
+
+        let blend = manualZoomBlend(at: timestamp, in: segment)
+        guard blend > 0 else { return baseSnapshot }
+
+        let focus = NormalizedPoint(
+            x: baseSnapshot.focus.x + ((segment.focus.x - baseSnapshot.focus.x) * blend),
+            y: baseSnapshot.focus.y + ((segment.focus.y - baseSnapshot.focus.y) * blend)
+        )
+        let zoom = baseSnapshot.zoom + ((segment.zoomLevel - baseSnapshot.zoom) * blend)
+        return FrameSnapshot(
+            focus: focus,
+            zoom: zoom.clamped(to: ManualZoomSegment.zoomRange),
+            emphasis: baseSnapshot.emphasis
+        )
+    }
+
+    private func activeManualZoomSegment(
+        at timestamp: TimeInterval,
+        in segments: [ManualZoomSegment]
+    ) -> ManualZoomSegment? {
+        segments
+            .filter { $0.source == .manual }
+            .filter { timestamp >= $0.start && timestamp <= $0.end }
+            .sorted { lhs, rhs in
+                if lhs.source != rhs.source {
+                    return lhs.source == .auto
+                }
+                return lhs.start < rhs.start
+            }
+            .last
+    }
+
+    private func manualZoomBlend(at timestamp: TimeInterval, in segment: ManualZoomSegment) -> Double {
+        let elapsed = timestamp - segment.start
+        let remaining = segment.end - timestamp
+        var blend = 1.0
+
+        if segment.easeInDuration > 0 {
+            blend = min(blend, elapsed / segment.easeInDuration)
+        }
+
+        if segment.easeOutDuration > 0 {
+            blend = min(blend, remaining / segment.easeOutDuration)
+        }
+
+        let progress = blend.clamped(to: 0...1)
+        return progress * progress * (3 - (2 * progress))
+    }
 }
 
 struct SourceCropPlanner {
@@ -136,16 +347,15 @@ struct SourceCropPlanner {
         guard sourceExtent.width > 0, sourceExtent.height > 0 else { return sourceExtent }
 
         let baseCrop = baseCropRect(for: sourceExtent, outputAspectRatio: outputAspectRatio)
-        let zoom = snapshot.zoom.clamped(to: 1.0...1.8)
+        let zoom = snapshot.zoom.clamped(to: ManualZoomSegment.zoomRange)
         let cropWidth = baseCrop.width / zoom
         let cropHeight = baseCrop.height / zoom
 
-        let safeInsets = recommendedSafeInsets(for: sourceExtent)
-        let safeRect = sourceExtent.insetBy(dx: safeInsets.dx, dy: 0)
-            .inset(by: UIEdgeInsetsLike(top: safeInsets.top, left: 0, bottom: safeInsets.bottom, right: 0))
-
-        let centerX = safeRect.minX + (snapshot.focus.x * safeRect.width)
-        let centerY = safeRect.maxY - (snapshot.focus.y * safeRect.height)
+        // CameraPlanEngine already clamps focus away from unstable screen edges.
+        // Using the full source extent here keeps click emphasis aligned with the
+        // actual pointer location instead of introducing an extra vertical offset.
+        let centerX = sourceExtent.minX + (snapshot.focus.x * sourceExtent.width)
+        let centerY = sourceExtent.maxY - (snapshot.focus.y * sourceExtent.height)
 
         let minX = sourceExtent.minX
         let maxX = sourceExtent.maxX - cropWidth
@@ -156,13 +366,6 @@ struct SourceCropPlanner {
         let originY = (centerY - (cropHeight / 2)).clamped(to: minY...max(maxY, minY))
 
         return CGRect(x: originX, y: originY, width: cropWidth, height: cropHeight)
-    }
-
-    private func recommendedSafeInsets(for sourceExtent: CGRect) -> (dx: CGFloat, top: CGFloat, bottom: CGFloat) {
-        let horizontalInset = sourceExtent.width * 0.02
-        let topInset = sourceExtent.height * 0.035
-        let bottomInset = sourceExtent.height * 0.10
-        return (horizontalInset, topInset, bottomInset)
     }
 
     func baseCropRect(for sourceExtent: CGRect, outputAspectRatio: CGFloat) -> CGRect {
@@ -178,6 +381,26 @@ struct SourceCropPlanner {
             return CGRect(x: sourceExtent.minX, y: y, width: sourceExtent.width, height: height)
         }
     }
+
+    func mappedContentPoint(
+        for focus: NormalizedPoint,
+        in sourceExtent: CGRect,
+        cropRect: CGRect,
+        layout: RenderLayout
+    ) -> CGPoint {
+        let sourcePoint = CGPoint(
+            x: sourceExtent.minX + (focus.x * sourceExtent.width),
+            y: sourceExtent.maxY - (focus.y * sourceExtent.height)
+        )
+
+        let relativeX = ((sourcePoint.x - cropRect.minX) / max(cropRect.width, 1)).clamped(to: 0...1)
+        let relativeY = ((sourcePoint.y - cropRect.minY) / max(cropRect.height, 1)).clamped(to: 0...1)
+
+        return CGPoint(
+            x: layout.contentRect.minX + (CGFloat(relativeX) * layout.contentRect.width),
+            y: layout.contentRect.minY + (CGFloat(relativeY) * layout.contentRect.height)
+        )
+    }
 }
 
 struct RenderLayout {
@@ -189,14 +412,13 @@ struct RenderLayout {
         self.renderSize = renderSize
         fullRect = CGRect(origin: .zero, size: renderSize)
 
-        let inset = max(renderSize.width, renderSize.height) > 0
-            ? padding * min(renderSize.width, renderSize.height)
-            : 0
+        let horizontalInset = renderSize.width > 0 ? padding * renderSize.width : 0
+        let verticalInset = renderSize.height > 0 ? padding * renderSize.height : 0
         contentRect = CGRect(
-            x: inset,
-            y: inset,
-            width: max(renderSize.width - (inset * 2), 1),
-            height: max(renderSize.height - (inset * 2), 1)
+            x: horizontalInset,
+            y: verticalInset,
+            width: max(renderSize.width - (horizontalInset * 2), 1),
+            height: max(renderSize.height - (verticalInset * 2), 1)
         )
     }
 
@@ -222,11 +444,15 @@ private final class ExportSessionBox: @unchecked Sendable {
 
 final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private let composer = FrameComposer()
+    private let pointerTimeline = PointerTimeline()
     private let cropPlanner = SourceCropPlanner()
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let previewLongestSide: CGFloat = 1280
+    private let previewVideoLongestSide: CGFloat = 960
     private let exportFPS: Int32 = 30
+    private let sourceFrameSeekTolerance = CMTime(value: 1, timescale: 12)
     private let renderColorSpace = CGColorSpaceCreateDeviceRGB()
+    private lazy var cursorTemplateImage: CIImage = makeCursorTemplateImage()
 
     func renderVideo(for project: RecordingProject, preset: ExportPreset, destinationURL: URL) async throws -> URL {
         guard let sourceURL = project.sourceVideoURL, FileManager.default.fileExists(atPath: sourceURL.path) else {
@@ -235,8 +461,26 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         return try await renderSourceVideo(
             for: project,
-            preset: preset,
             sourceURL: sourceURL,
+            renderSize: preset.renderSize,
+            destinationURL: destinationURL
+        )
+    }
+
+    func renderPreviewVideo(
+        for project: RecordingProject,
+        preset: ExportPreset,
+        destinationURL: URL
+    ) async throws -> URL {
+        let renderSize = previewVideoRenderSize(for: preset.renderSize)
+        guard let sourceURL = project.sourceVideoURL, FileManager.default.fileExists(atPath: sourceURL.path) else {
+            return try await renderDebugVideo(for: project, renderSize: renderSize, destinationURL: destinationURL)
+        }
+
+        return try await renderSourceVideo(
+            for: project,
+            sourceURL: sourceURL,
+            renderSize: renderSize,
             destinationURL: destinationURL
         )
     }
@@ -251,47 +495,59 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         }
 
         let renderSize = previewRenderSize(for: preset.renderSize)
-        let clampedTimestamp = timestamp.clamped(to: 0...max(project.duration, 0))
-        let snapshot = composer.snapshot(at: clampedTimestamp, from: project.cameraKeyframes)
+        let trimRange = project.effectiveTrimRange
+        let clampedTimestamp = timestamp.clamped(to: trimRange.start...trimRange.end)
+        let snapshot = composer.snapshot(
+            at: clampedTimestamp,
+            from: project.cameraKeyframes,
+            manualZoomSegments: project.manualZoomSegments
+        )
+        let pointerSnapshot = pointerTimeline.snapshot(at: clampedTimestamp, from: project.events, smoothing: .raw)
+
+        let asset = AVURLAsset(url: sourceURL)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = renderSize
+        generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
+        generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
+
+        let time = CMTime(seconds: clampedTimestamp, preferredTimescale: 600)
+        let sourceFrame = try await generateSourceFrame(from: generator, at: time)
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { [self] in
-                do {
-                    let asset = AVURLAsset(url: sourceURL)
-                    let generator = AVAssetImageGenerator(asset: asset)
-                    generator.appliesPreferredTrackTransform = true
-                    generator.maximumSize = renderSize
+                let sourceImage = CIImage(cgImage: sourceFrame)
+                let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
+                let composedFrame = composeFrame(
+                    from: sourceImage,
+                    snapshot: snapshot,
+                    pointerSnapshot: pointerSnapshot,
+                    project: project,
+                    preparedAssets: preparedAssets
+                )
 
-                    let time = CMTime(seconds: clampedTimestamp, preferredTimescale: 600)
-                    let sourceFrame = try generator.copyCGImage(at: time, actualTime: nil)
-                    let sourceImage = CIImage(cgImage: sourceFrame)
-                    let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
-                    let composedFrame = composeFrame(
-                        from: sourceImage,
-                        snapshot: snapshot,
-                        preparedAssets: preparedAssets
-                    )
-
-                    guard let outputImage = ciContext.createCGImage(composedFrame, from: preparedAssets.layout.fullRect) else {
-                        throw VideoRendererError.unableToCreateContext
-                    }
-
-                    continuation.resume(returning: NSImage(cgImage: outputImage, size: renderSize))
-                } catch {
-                    continuation.resume(throwing: error)
+                guard let outputImage = ciContext.createCGImage(composedFrame, from: preparedAssets.layout.fullRect) else {
+                    continuation.resume(throwing: VideoRendererError.unableToCreateContext)
+                    return
                 }
+
+                continuation.resume(returning: NSImage(cgImage: outputImage, size: renderSize))
             }
         }
     }
 
     func renderDebugVideo(for project: RecordingProject, preset: ExportPreset, destinationURL: URL) async throws -> URL {
+        try await renderDebugVideo(for: project, renderSize: preset.renderSize, destinationURL: destinationURL)
+    }
+
+    private func renderDebugVideo(for project: RecordingProject, renderSize: CGSize, destinationURL: URL) async throws -> URL {
         let fm = FileManager.default
         if fm.fileExists(atPath: destinationURL.path) {
             try fm.removeItem(at: destinationURL)
         }
 
         let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .mp4)
-        let size = preset.renderSize
+        let size = renderSize
         let outputSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: size.width,
@@ -321,25 +577,36 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         writer.startSession(atSourceTime: .zero)
 
         let fps: Int32 = 30
-        let duration = max(project.duration, 6.0)
-        let totalFrames = max(Int(duration * Double(fps)), 1)
+        let clipSegments = project.effectiveClipSegments
+        let duration = max(totalDuration(of: clipSegments), 1.0 / Double(fps))
+        let totalFrames = max(Int(ceil(duration * Double(fps))), 1)
         let frameDuration = CMTime(value: 1, timescale: fps)
 
         for frameIndex in 0..<totalFrames {
+            try Task.checkCancellation()
+
             while !input.isReadyForMoreMediaData {
+                try Task.checkCancellation()
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
 
             autoreleasepool {
                 let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
-                let timestamp = Double(frameIndex) / Double(fps)
-                let snapshot = composer.snapshot(at: timestamp, from: project.cameraKeyframes)
+                let outputTimestamp = min(Double(frameIndex) / Double(fps), max(duration - (1.0 / Double(fps)), 0))
+                let timestamp = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
+                let snapshot = composer.snapshot(
+                    at: timestamp,
+                    from: project.cameraKeyframes,
+                    manualZoomSegments: project.manualZoomSegments
+                )
+                let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
 
                 if let buffer = makePixelBuffer(from: adaptor, size: size) {
                     drawDebugFrame(
                         in: buffer,
                         size: size,
                         snapshot: snapshot,
+                        pointerSnapshot: pointerSnapshot,
                         project: project,
                         timestamp: timestamp
                     )
@@ -365,8 +632,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
     private func renderSourceVideo(
         for project: RecordingProject,
-        preset: ExportPreset,
         sourceURL: URL,
+        renderSize: CGSize,
         destinationURL: URL
     ) async throws -> URL {
         let fm = FileManager.default
@@ -375,20 +642,24 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         }
 
         let asset = AVURLAsset(url: sourceURL)
-        let renderSize = preset.renderSize
         let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
 
         let temporaryVideoURL = destinationURL.deletingLastPathComponent()
             .appendingPathComponent("render-\(UUID().uuidString).mp4")
         defer { try? fm.removeItem(at: temporaryVideoURL) }
 
-        let renderedVideoURL = try await renderFixedFrameVideo(
-            for: project,
-            sourceAsset: asset,
-            preparedAssets: preparedAssets,
-            renderSize: renderSize,
-            destinationURL: temporaryVideoURL
-        )
+        let renderedVideoURL: URL
+        do {
+            renderedVideoURL = try await renderFixedFrameVideo(
+                for: project,
+                sourceAsset: asset,
+                preparedAssets: preparedAssets,
+                renderSize: renderSize,
+                destinationURL: temporaryVideoURL
+            )
+        } catch {
+            throw normalizedRenderError(error, for: sourceURL)
+        }
 
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         guard !audioTracks.isEmpty else {
@@ -398,6 +669,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         return try await muxAudio(
             from: asset,
+            clipSegments: project.effectiveClipSegments,
             renderedVideoURL: renderedVideoURL,
             destinationURL: destinationURL
         )
@@ -451,33 +723,48 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         writer.startSession(atSourceTime: .zero)
 
         let assetDuration = try await sourceAsset.load(.duration)
-        let durationSeconds = max(project.duration, CMTimeGetSeconds(assetDuration))
-        let safeDuration = max(durationSeconds, 1.0 / Double(exportFPS))
+        let sourceDuration = max(CMTimeGetSeconds(assetDuration), 0)
+        let clipSegments = RecordingProject.normalizedClipSegments(project.effectiveClipSegments, duration: sourceDuration)
+        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(exportFPS))
         let totalFrames = max(Int(ceil(safeDuration * Double(exportFPS))), 1)
         let frameDuration = CMTime(value: 1, timescale: exportFPS)
-        let maxTimestamp = max(safeDuration - (1.0 / Double(exportFPS)), 0)
 
         let generator = AVAssetImageGenerator(asset: sourceAsset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = renderSize
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        // ScreenCaptureKit MP4s are not always seekable at exact frame timestamps.
+        // A small tolerance keeps export aligned while avoiding decode/open failures.
+        generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
+        generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
 
         for frameIndex in 0..<totalFrames {
+            try Task.checkCancellation()
+
             while !input.isReadyForMoreMediaData {
+                try Task.checkCancellation()
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
 
+            let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
+            let outputTimestamp = min(Double(frameIndex) / Double(exportFPS), max(safeDuration - (1.0 / Double(exportFPS)), 0))
+            let seconds = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
+            let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
+            try Task.checkCancellation()
+
             try autoreleasepool {
-                let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
-                let seconds = min(Double(frameIndex) / Double(exportFPS), maxTimestamp)
-                let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
-                let sourceFrame = try generator.copyCGImage(at: sourceTime, actualTime: nil)
                 let sourceImage = CIImage(cgImage: sourceFrame)
-                let snapshot = composer.snapshot(at: seconds, from: project.cameraKeyframes)
+                let snapshot = composer.snapshot(
+                    at: seconds,
+                    from: project.cameraKeyframes,
+                    manualZoomSegments: project.manualZoomSegments
+                )
+                let pointerSnapshot = pointerTimeline.snapshot(at: seconds, from: project.events, smoothing: .raw)
                 let composedFrame = composeFrame(
                     from: sourceImage,
                     snapshot: snapshot,
+                    pointerSnapshot: pointerSnapshot,
+                    project: project,
                     preparedAssets: preparedAssets
                 )
 
@@ -503,8 +790,30 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return destinationURL
     }
 
+    private func generateSourceFrame(from generator: AVAssetImageGenerator, at time: CMTime) async throws -> CGImage {
+        try await withCheckedThrowingContinuation { continuation in
+            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, image, _, result, error in
+                switch result {
+                case .succeeded:
+                    if let image {
+                        continuation.resume(returning: image)
+                    } else {
+                        continuation.resume(throwing: VideoRendererError.unableToCreateContext)
+                    }
+                case .failed:
+                    continuation.resume(throwing: error ?? VideoRendererError.legacySourceRequiresRecapture)
+                case .cancelled:
+                    continuation.resume(throwing: error ?? VideoRendererError.exportFailed)
+                @unknown default:
+                    continuation.resume(throwing: error ?? VideoRendererError.exportFailed)
+                }
+            }
+        }
+    }
+
     private func muxAudio(
         from sourceAsset: AVURLAsset,
+        clipSegments: [ProjectTrimRange],
         renderedVideoURL: URL,
         destinationURL: URL
     ) async throws -> URL {
@@ -534,29 +843,66 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
         compositionVideoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
 
-        if
-            let sourceAudioTrack = try await sourceAsset.loadTracks(withMediaType: .audio).first,
-            let compositionAudioTrack = composition.addMutableTrack(
-                withMediaType: .audio,
-                preferredTrackID: kCMPersistentTrackID_Invalid
-            )
-        {
+        let sourceAudioTracks = try await sourceAsset.loadTracks(withMediaType: .audio)
+        var audioMixParameters: [AVMutableAudioMixInputParameters] = []
+        if !sourceAudioTracks.isEmpty {
             let sourceAudioDuration = try await sourceAsset.load(.duration)
-            let audioDuration = CMTimeMinimum(videoDuration, sourceAudioDuration)
-            try compositionAudioTrack.insertTimeRange(
-                CMTimeRange(start: .zero, duration: audioDuration),
-                of: sourceAudioTrack,
-                at: .zero
-            )
+            let sourceDuration = max(CMTimeGetSeconds(sourceAudioDuration), 0)
+            let normalizedSegments = RecordingProject.normalizedClipSegments(clipSegments, duration: sourceDuration)
+
+            for sourceAudioTrack in sourceAudioTracks {
+                guard let compositionAudioTrack = composition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                ) else {
+                    continue
+                }
+
+                var outputCursor = CMTime.zero
+                for segment in normalizedSegments {
+                    let audioStart = CMTime(seconds: segment.start, preferredTimescale: 600)
+                    let requestedDuration = CMTime(seconds: segment.duration, preferredTimescale: 600)
+                    let remainingSourceDuration = CMTimeSubtract(sourceAudioDuration, audioStart)
+                    let remainingOutputDuration = CMTimeSubtract(videoDuration, outputCursor)
+                    let audioDuration = CMTimeMinimum(
+                        requestedDuration,
+                        CMTimeMinimum(remainingSourceDuration, remainingOutputDuration)
+                    )
+
+                    guard CMTimeCompare(audioDuration, .zero) > 0 else { continue }
+
+                    try compositionAudioTrack.insertTimeRange(
+                        CMTimeRange(start: audioStart, duration: audioDuration),
+                        of: sourceAudioTrack,
+                        at: outputCursor
+                    )
+                    outputCursor = CMTimeAdd(outputCursor, audioDuration)
+                }
+
+                let inputParameters = AVMutableAudioMixInputParameters(track: compositionAudioTrack)
+                inputParameters.setVolume(1.0, at: .zero)
+                audioMixParameters.append(inputParameters)
+            }
         }
 
-        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+        // ScreenCaptureKit system-audio tracks are not consistently mp4-compatible
+        // when passed through directly. Re-encoding keeps single-track exports
+        // stable instead of failing only when the source happens to contain a
+        // non-passthrough-friendly audio format.
+        let exportPreset = AVAssetExportPresetHighestQuality
+
+        guard let exportSession = AVAssetExportSession(asset: composition, presetName: exportPreset) else {
             throw VideoRendererError.unableToCreateExportSession
         }
 
         exportSession.outputURL = destinationURL
         exportSession.outputFileType = .mp4
         exportSession.shouldOptimizeForNetworkUse = true
+        if sourceAudioTracks.count > 1, audioMixParameters.isEmpty == false {
+            let audioMix = AVMutableAudioMix()
+            audioMix.inputParameters = audioMixParameters
+            exportSession.audioMix = audioMix
+        }
 
         try await export(exportSession)
         return destinationURL
@@ -572,6 +918,45 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func totalDuration(of clipSegments: [ProjectTrimRange]) -> TimeInterval {
+        clipSegments.reduce(0) { $0 + $1.duration }
+    }
+
+    private func sourceTimestamp(atClipOffset offset: TimeInterval, in clipSegments: [ProjectTrimRange]) -> TimeInterval {
+        guard let first = clipSegments.first else { return 0 }
+
+        var remaining = offset.clamped(to: 0...max(totalDuration(of: clipSegments), 0))
+        for segment in clipSegments {
+            if remaining <= segment.duration {
+                return segment.start + remaining
+            }
+            remaining -= segment.duration
+        }
+
+        return clipSegments.last?.end ?? first.start
+    }
+
+    private func normalizedRenderError(_ error: Error, for sourceURL: URL) -> Error {
+        guard sourceURL.pathExtension.lowercased() == "mp4" else {
+            return error
+        }
+
+        let nsError = error as NSError
+        let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        let avCodes: Set<Int> = [-11800, -11821, -11832, -11869]
+        let osStatusCodes: Set<Int> = [-12911, -12431, -12430, -12122]
+
+        if avCodes.contains(nsError.code) || osStatusCodes.contains(nsError.code) {
+            return VideoRendererError.legacySourceRequiresRecapture
+        }
+
+        if let underlyingError, osStatusCodes.contains(underlyingError.code) {
+            return VideoRendererError.legacySourceRequiresRecapture
+        }
+
+        return error
     }
 
     private func export(_ session: AVAssetExportSession) async throws {
@@ -602,6 +987,17 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
     }
 
+    private func previewVideoRenderSize(for renderSize: CGSize) -> CGSize {
+        let longestSide = max(renderSize.width, renderSize.height)
+        guard longestSide > previewVideoLongestSide else { return renderSize }
+
+        let scale = previewVideoLongestSide / longestSide
+        return CGSize(
+            width: floor(renderSize.width * scale),
+            height: floor(renderSize.height * scale)
+        )
+    }
+
     private func prepareAssets(renderSize: CGSize, style: ProjectStyle) -> PreparedRenderAssets {
         let layout = RenderLayout(renderSize: renderSize, padding: style.padding)
         return PreparedRenderAssets(
@@ -625,6 +1021,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private func composeFrame(
         from sourceImage: CIImage,
         snapshot: FrameSnapshot,
+        pointerSnapshot: PointerSnapshot?,
+        project: RecordingProject,
         preparedAssets: PreparedRenderAssets
     ) -> CIImage {
         let cropRect = cropPlanner.cropRect(
@@ -661,10 +1059,22 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let emphasized = applyClickEmphasis(
             to: maskedContent,
             snapshot: snapshot,
-            layout: preparedAssets.layout
+            reconstructsCursor: project.reconstructsCursor,
+            layout: preparedAssets.layout,
+            sourceExtent: sourceImage.extent,
+            cropRect: cropRect
         )
 
-        return emphasized.composited(over: preparedAssets.backgroundImage)
+        let withCursor = applyCursorOverlay(
+            to: emphasized,
+            pointerSnapshot: pointerSnapshot,
+            reconstructsCursor: project.reconstructsCursor,
+            layout: preparedAssets.layout,
+            sourceExtent: sourceImage.extent,
+            cropRect: cropRect
+        )
+
+        return withCursor.composited(over: preparedAssets.backgroundImage)
     }
 
     private func makeBackgroundImage(
@@ -712,6 +1122,36 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 CGColor(red: 1.0, green: 0.83, blue: 0.78, alpha: 1),
                 CGColor(red: 0.99, green: 0.88, blue: 0.95, alpha: 1)
             ]
+        case .ocean:
+            colors = [
+                CGColor(red: 0.72, green: 0.92, blue: 1.0, alpha: 1),
+                CGColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1),
+                CGColor(red: 0.18, green: 0.34, blue: 0.72, alpha: 1)
+            ]
+        case .plum:
+            colors = [
+                CGColor(red: 0.95, green: 0.84, blue: 1.0, alpha: 1),
+                CGColor(red: 0.68, green: 0.56, blue: 0.94, alpha: 1),
+                CGColor(red: 0.30, green: 0.20, blue: 0.48, alpha: 1)
+            ]
+        case .moss:
+            colors = [
+                CGColor(red: 0.88, green: 0.96, blue: 0.78, alpha: 1),
+                CGColor(red: 0.62, green: 0.76, blue: 0.52, alpha: 1),
+                CGColor(red: 0.24, green: 0.38, blue: 0.30, alpha: 1)
+            ]
+        case .paper:
+            colors = [
+                CGColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1),
+                CGColor(red: 0.90, green: 0.91, blue: 0.92, alpha: 1),
+                CGColor(red: 0.78, green: 0.84, blue: 0.88, alpha: 1)
+            ]
+        case .midnight:
+            colors = [
+                CGColor(red: 0.05, green: 0.06, blue: 0.10, alpha: 1),
+                CGColor(red: 0.09, green: 0.12, blue: 0.22, alpha: 1),
+                CGColor(red: 0.14, green: 0.20, blue: 0.35, alpha: 1)
+            ]
         }
 
         if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0, 0.55, 1]) {
@@ -722,19 +1162,6 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 options: []
             )
         }
-
-        let shadowRect = contentRect.offsetBy(dx: 0, dy: -10)
-        let shadowPath = CGPath(
-            roundedRect: shadowRect,
-            cornerWidth: cornerRadius,
-            cornerHeight: cornerRadius,
-            transform: nil
-        )
-        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.12))
-        context.setShadow(offset: CGSize(width: 0, height: 14), blur: shadowRadius, color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.12))
-        context.addPath(shadowPath)
-        context.fillPath()
-        context.setShadow(offset: .zero, blur: 0, color: nil)
 
         guard let image = context.makeImage() else {
             return CIImage(color: .white).cropped(to: CGRect(origin: .zero, size: size))
@@ -783,15 +1210,35 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private func applyClickEmphasis(
         to image: CIImage,
         snapshot: FrameSnapshot,
+        reconstructsCursor: Bool,
+        layout: RenderLayout,
+        sourceExtent: CGRect,
+        cropRect: CGRect
+    ) -> CIImage {
+        guard reconstructsCursor == false else {
+            return image
+        }
+
+        guard snapshot.emphasis == .click else {
+            return image
+        }
+
+        let point = cropPlanner.mappedContentPoint(
+            for: snapshot.focus,
+            in: sourceExtent,
+            cropRect: cropRect,
+            layout: layout
+        )
+        return applyClickRipple(to: image, point: point, intensity: 1.0, layout: layout)
+    }
+
+    private func applyClickRipple(
+        to image: CIImage,
+        point: CGPoint,
+        intensity: Double,
         layout: RenderLayout
     ) -> CIImage {
-        guard snapshot.emphasis == .click else { return image }
-
-        let point = CGPoint(
-            x: layout.contentRect.minX + (snapshot.focus.x * layout.contentRect.width),
-            y: layout.contentRect.minY + ((1 - snapshot.focus.y) * layout.contentRect.height)
-        )
-        let radius = max(28, min(layout.contentRect.width, layout.contentRect.height) * 0.06)
+        let radius = max(20, min(layout.contentRect.width, layout.contentRect.height) * (0.034 + (0.016 * intensity)))
 
         let solidCircle = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 0.14))
             .cropped(to: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
@@ -801,7 +1248,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     "inputCenter": CIVector(x: point.x, y: point.y),
                     "inputRadius0": radius * 0.15,
                     "inputRadius1": radius,
-                    "inputColor0": CIColor(red: 1, green: 1, blue: 1, alpha: 0.24),
+                    "inputColor0": CIColor(red: 1, green: 1, blue: 1, alpha: 0.08 + (0.08 * intensity)),
                     "inputColor1": CIColor(red: 1, green: 1, blue: 1, alpha: 0)
                 ]
             )
@@ -813,15 +1260,57 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 "CIRadialGradient",
                 parameters: [
                     "inputCenter": CIVector(x: point.x, y: point.y),
-                    "inputRadius0": radius * 0.78,
-                    "inputRadius1": radius * 1.05,
-                    "inputColor0": CIColor(red: 0.15, green: 0.47, blue: 1.0, alpha: 0.65),
+                    "inputRadius0": radius * 0.82,
+                    "inputRadius1": radius * 1.08,
+                    "inputColor0": CIColor(red: 0.15, green: 0.47, blue: 1.0, alpha: 0.22 + (0.18 * intensity)),
                     "inputColor1": CIColor(red: 0.15, green: 0.47, blue: 1.0, alpha: 0)
                 ]
             )
             .cropped(to: layout.fullRect)
 
         return ring.composited(over: solidCircle.composited(over: image))
+    }
+
+    private func applyCursorOverlay(
+        to image: CIImage,
+        pointerSnapshot: PointerSnapshot?,
+        reconstructsCursor: Bool,
+        layout: RenderLayout,
+        sourceExtent: CGRect,
+        cropRect: CGRect
+    ) -> CIImage {
+        guard reconstructsCursor, let pointerSnapshot else { return image }
+
+        let point = cropPlanner.mappedContentPoint(
+            for: pointerSnapshot.location,
+            in: sourceExtent,
+            cropRect: cropRect,
+            layout: layout
+        )
+
+        var layeredImage = image
+        if pointerSnapshot.isClickActive, let clickLocation = pointerSnapshot.clickLocation {
+            let clickPoint = cropPlanner.mappedContentPoint(
+                for: clickLocation,
+                in: sourceExtent,
+                cropRect: cropRect,
+                layout: layout
+            )
+            let intensity = (0.45 + (pointerSnapshot.clickProgress * 0.55)).clamped(to: 0.45...1.0)
+            layeredImage = applyClickRipple(to: layeredImage, point: clickPoint, intensity: intensity, layout: layout)
+        }
+
+        let baseScale = (min(layout.contentRect.width, layout.contentRect.height) / 1050).clamped(to: 0.78...1.08)
+        let scale = baseScale * (1 + (pointerSnapshot.clickProgress * 0.05))
+        let origin = CursorGeometry.origin(forTip: point, scale: scale)
+        let transform = CGAffineTransform(scaleX: scale, y: scale)
+            .translatedBy(x: origin.x, y: origin.y)
+
+        let cursor = cursorTemplateImage
+            .transformed(by: transform)
+            .cropped(to: layout.fullRect)
+
+        return cursor.composited(over: layeredImage)
     }
 
     private func makePixelBuffer(from adaptor: AVAssetWriterInputPixelBufferAdaptor, size: CGSize) -> CVPixelBuffer? {
@@ -832,10 +1321,68 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return buffer
     }
 
+    private func makeCursorTemplateImage() -> CIImage {
+        let size = CursorGeometry.templateSize
+        let width = Int(size.width)
+        let height = Int(size.height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            return CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: size))
+        }
+
+        context.clear(CGRect(origin: .zero, size: size))
+
+        let cursorPath = CGMutablePath()
+        cursorPath.move(to: CGPoint(x: 5, y: 5))
+        cursorPath.addLine(to: CGPoint(x: 5, y: 35))
+        cursorPath.addLine(to: CGPoint(x: 13, y: 27))
+        cursorPath.addLine(to: CGPoint(x: 18, y: 40))
+        cursorPath.addLine(to: CGPoint(x: 24, y: 37))
+        cursorPath.addLine(to: CGPoint(x: 19, y: 25))
+        cursorPath.addLine(to: CGPoint(x: 31, y: 25))
+        cursorPath.closeSubpath()
+
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: 2), blur: 4, color: CGColor(red: 0, green: 0, blue: 0, alpha: 0.30))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.18))
+        context.addPath(cursorPath)
+        context.fillPath()
+        context.restoreGState()
+
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.addPath(cursorPath)
+        context.fillPath()
+
+        context.setStrokeColor(CGColor(red: 0.02, green: 0.025, blue: 0.035, alpha: 0.90))
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+        context.setLineWidth(1.35)
+        context.addPath(cursorPath)
+        context.strokePath()
+
+        guard let image = context.makeImage() else {
+            return CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: size))
+        }
+
+        return CIImage(cgImage: image)
+    }
+
     private func drawDebugFrame(
         in buffer: CVPixelBuffer,
         size: CGSize,
         snapshot: FrameSnapshot,
+        pointerSnapshot: PointerSnapshot?,
         project: RecordingProject,
         timestamp: TimeInterval
     ) {
@@ -870,8 +1417,6 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             height: size.height - (padding * 2)
         )
 
-        let shadowColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0.18)
-        context.setShadow(offset: CGSize(width: 0, height: 14), blur: project.style.shadowRadius, color: shadowColor)
         context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.96))
         let cardPath = CGPath(
             roundedRect: contentRect,
@@ -881,13 +1426,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
         context.addPath(cardPath)
         context.fillPath()
-        context.setShadow(offset: .zero, blur: 0, color: nil)
 
         drawDebugGrid(in: context, rect: contentRect)
 
+        let focusSource = project.reconstructsCursor ? (pointerSnapshot?.location ?? snapshot.focus) : snapshot.focus
         let focusPoint = CGPoint(
-            x: contentRect.minX + (snapshot.focus.x * contentRect.width),
-            y: contentRect.minY + (snapshot.focus.y * contentRect.height)
+            x: contentRect.minX + (focusSource.x * contentRect.width),
+            y: contentRect.minY + (focusSource.y * contentRect.height)
         )
 
         let ringRadius = 42 * snapshot.zoom
@@ -979,7 +1524,46 @@ final class ExportCoordinator {
         try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true, attributes: nil)
         let filename = Self.exportFilename(for: project, preset: preset)
         let destinationURL = exportDirectory.appendingPathComponent(filename)
-        return try await renderer.renderVideo(for: project, preset: preset, destinationURL: destinationURL)
+        return try await exportVideo(for: project, preset: preset, destinationURL: destinationURL)
+    }
+
+    func exportVideo(for project: RecordingProject, preset: ExportPreset, destinationURL: URL) async throws -> URL {
+        let workingDirectory = projectStore.exportDirectory(for: project)
+        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true, attributes: nil)
+
+        let workingURL = workingDirectory.appendingPathComponent("working-\(UUID().uuidString).mp4")
+        defer {
+            if workingURL.standardizedFileURL != destinationURL.standardizedFileURL {
+                try? FileManager.default.removeItem(at: workingURL)
+            }
+        }
+
+        let renderedURL = try await renderer.renderVideo(for: project, preset: preset, destinationURL: workingURL)
+        return try moveExportedVideo(from: renderedURL, to: destinationURL)
+    }
+
+    private func moveExportedVideo(from sourceURL: URL, to destinationURL: URL) throws -> URL {
+        let fileManager = FileManager.default
+        guard sourceURL.standardizedFileURL != destinationURL.standardizedFileURL else {
+            return sourceURL
+        }
+
+        let accessedSecurityScope = destinationURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessedSecurityScope {
+                destinationURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let destinationDirectory = destinationURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true, attributes: nil)
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        return destinationURL
     }
 
     static func exportFilename(for project: RecordingProject, preset: ExportPreset) -> String {
@@ -1005,5 +1589,22 @@ private extension String {
         let pieces = components(separatedBy: allowed.inverted).filter { !$0.isEmpty }
         let joined = pieces.joined(separator: "_")
         return joined.isEmpty ? "MouseLens_Export" : joined
+    }
+}
+
+private extension NormalizedPoint {
+    func limitedToward(_ target: NormalizedPoint, maxDistance: Double) -> NormalizedPoint {
+        let dx = target.x - x
+        let dy = target.y - y
+        let distance = (dx * dx + dy * dy).squareRoot()
+        guard distance > maxDistance, distance > 0.0001 else {
+            return target
+        }
+
+        let ratio = maxDistance / distance
+        return NormalizedPoint(
+            x: x + (dx * ratio),
+            y: y + (dy * ratio)
+        )
     }
 }

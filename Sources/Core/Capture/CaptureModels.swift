@@ -87,12 +87,13 @@ struct CaptureSession: Equatable, Codable {
     let id: UUID
     let configuration: ScreenRecorderConfiguration
     let startedAt: Date
+    let mediaStartedAt: Date?
     let endedAt: Date
     let rawCaptureURL: URL?
     let coordinateSpace: CaptureCoordinateSpace?
 
     var duration: TimeInterval {
-        endedAt.timeIntervalSince(startedAt)
+        endedAt.timeIntervalSince(mediaStartedAt ?? startedAt)
     }
 }
 
@@ -154,6 +155,7 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
     private var disabledAudioInputs: Set<ObjectIdentifier> = []
     private var lastVideoPresentationTime: CMTime?
     private var lastAudioPresentationTimes: [ObjectIdentifier: CMTime] = [:]
+    private var firstVideoFrameDate: Date?
 
     init(
         outputURL: URL,
@@ -294,6 +296,14 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
         }
     }
 
+    func firstVideoFrameWallClockDate() async -> Date? {
+        await withCheckedContinuation { continuation in
+            sampleHandlerQueue.async { [self] in
+                continuation.resume(returning: firstVideoFrameDate)
+            }
+        }
+    }
+
     private func appendVideo(_ sampleBuffer: CMSampleBuffer) {
         guard !isFinishing else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -310,6 +320,7 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
             }
             writer.startSession(atSourceTime: .zero)
             sessionStartPTS = rawPresentationTime
+            firstVideoFrameDate = Date()
             accumulatedPauseDuration = .zero
             pauseStartedPTS = nil
             pendingResume = false
@@ -650,6 +661,7 @@ final class ScreenRecorder {
             id: sessionID,
             configuration: configuration,
             startedAt: startDate,
+            mediaStartedAt: nil,
             endedAt: startDate,
             rawCaptureURL: scratchURL,
             coordinateSpace: coordinateSpace
@@ -669,11 +681,13 @@ final class ScreenRecorder {
 
         try await stopCapture(stream: activeRecording.stream)
         try await activeRecording.fileRecorder.finish()
+        let mediaStartedAt = await activeRecording.fileRecorder.firstVideoFrameWallClockDate()
 
         let session = CaptureSession(
             id: activeRecording.sessionID,
             configuration: activeRecording.configuration,
             startedAt: activeRecording.startedAt,
+            mediaStartedAt: mediaStartedAt,
             endedAt: Date(),
             rawCaptureURL: activeRecording.rawCaptureURL,
             coordinateSpace: activeRecording.coordinateSpace

@@ -193,6 +193,65 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.project?.zoomTrackEdited, true)
     }
 
+    func testSplittingSelectedManualZoomSegmentAtPlayheadPreservesSource() throws {
+        let viewModel = makeViewModel()
+        let autoSegment = ManualZoomSegment(
+            start: 0.2,
+            end: 0.8,
+            focus: .init(x: 0.35, y: 0.45),
+            zoomLevel: 1.8,
+            source: .auto
+        )
+        let project = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            manualZoomSegments: [autoSegment],
+            zoomTrackEdited: false
+        )
+
+        viewModel.configure(for: project)
+        viewModel.updatePreviewTimestamp(0.5)
+        XCTAssertTrue(viewModel.canSplitTimelineSelection)
+
+        viewModel.splitTimelineSelectionAtPlayhead()
+
+        XCTAssertEqual(viewModel.manualZoomSegments.count, 2)
+        XCTAssertEqual(viewModel.manualZoomSegments[0].start, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.manualZoomSegments[0].end, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.manualZoomSegments[1].start, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.manualZoomSegments[1].end, 0.8, accuracy: 0.0001)
+        XCTAssertTrue(viewModel.manualZoomSegments.allSatisfy { $0.source == .auto })
+        XCTAssertEqual(viewModel.project?.zoomTrackEdited, true)
+    }
+
+    func testDeletingTimelineSelectionDeletesZoomBeforeClip() throws {
+        let viewModel = makeViewModel()
+        let segment = ManualZoomSegment(
+            start: 0.2,
+            end: 0.8,
+            focus: .center,
+            zoomLevel: 1.7,
+            source: .manual
+        )
+        let project = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            manualZoomSegments: [segment],
+            zoomTrackEdited: true
+        )
+
+        viewModel.configure(for: project)
+        viewModel.updatePreviewTimestamp(0.5)
+        viewModel.splitClipAtPlayhead()
+        XCTAssertEqual(viewModel.clipSegments.count, 2)
+
+        viewModel.deleteTimelineSelection()
+
+        XCTAssertTrue(viewModel.manualZoomSegments.isEmpty)
+        XCTAssertEqual(viewModel.clipSegments.count, 2)
+        XCTAssertEqual(viewModel.project?.zoomTrackEdited, true)
+    }
+
     func testManualZoomAreaAdjustmentIsExplicit() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
@@ -347,6 +406,80 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(normalized.y, 0.25, accuracy: 0.0001)
     }
 
+    func testPointerEventStorePreservesRawGlobalLocation() throws {
+        let store = PointerEventStore()
+        store.reset(origin: Date())
+        store.append(
+            location: NormalizedPoint(x: 0.3, y: 0.25),
+            globalLocation: CGPoint(x: 300, y: 600),
+            type: .click
+        )
+
+        let event = try XCTUnwrap(store.snapshot().first)
+        let globalLocation = try XCTUnwrap(event.globalLocation)
+        XCTAssertEqual(globalLocation.x, 300, accuracy: 0.0001)
+        XCTAssertEqual(globalLocation.y, 600, accuracy: 0.0001)
+    }
+
+    func testPointerNormalizationPrefersRawGlobalLocationOverLegacyNormalizedLocation() {
+        let coordinateSpace = CaptureCoordinateSpace(
+            viewport: CaptureViewport(rect: CGRect(x: 100, y: 450, width: 400, height: 300)),
+            screenBounds: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        )
+        let event = PointerEvent(
+            timestamp: 0.4,
+            location: NormalizedPoint(x: 0.9, y: 0.9),
+            globalLocation: PointerGlobalLocation(x: 300, y: 600),
+            type: .click
+        )
+
+        let normalized = HomeViewModel.normalizedPointerEvents(
+            [event],
+            coordinateSpace: coordinateSpace,
+            target: .window
+        )
+
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized[0].location.x, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(normalized[0].location.y, 0.5, accuracy: 0.0001)
+        let globalLocation = try? XCTUnwrap(normalized[0].globalLocation)
+        XCTAssertEqual(globalLocation?.x ?? 0, 300, accuracy: 0.0001)
+        XCTAssertEqual(globalLocation?.y ?? 0, 600, accuracy: 0.0001)
+    }
+
+    func testWindowPointerNormalizationAcceptsRecordedWindowViewportCoordinates() {
+        let coordinateSpace = CaptureCoordinateSpace(
+            viewport: CaptureViewport(rect: CGRect(x: 206, y: 294, width: 1024, height: 680)),
+            screenBounds: CaptureViewport(rect: CGRect(x: 0, y: -180, width: 3360, height: 1080))
+        )
+        let event = PointerEvent(
+            timestamp: 0.88,
+            location: NormalizedPoint(x: 0.1085600353422619, y: 0.16571180555555554),
+            globalLocation: PointerGlobalLocation(x: 364.76171875, y: 721.03125),
+            type: .click
+        )
+
+        let normalized = HomeViewModel.normalizedPointerEvents(
+            [event],
+            coordinateSpace: coordinateSpace,
+            target: .window
+        )
+
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized[0].location.x, 0.1550407410, accuracy: 0.0001)
+        XCTAssertEqual(normalized[0].location.y, 0.372013, accuracy: 0.0001)
+    }
+
+    func testPointerEventStoreCanUseCaptureStartOrigin() {
+        let store = PointerEventStore()
+        store.reset(origin: Date().addingTimeInterval(-2))
+        store.append(location: .center, type: .click)
+
+        let event = store.snapshot().first
+        XCTAssertNotNil(event)
+        XCTAssertEqual(event?.timestamp ?? 0, 2, accuracy: 0.2)
+    }
+
     func testWindowPointerNormalizationKeepsWindowLocalDirections() {
         let coordinateSpace = CaptureCoordinateSpace(
             viewport: CaptureViewport(rect: CGRect(x: 100, y: 450, width: 400, height: 300)),
@@ -369,7 +502,7 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(normalized[0].location.y, 0.2, accuracy: 0.0001)
     }
 
-    func testWindowPointerNormalizationUsesFlippedViewportWhenNeeded() {
+    func testWindowPointerNormalizationDoesNotGuessFlippedViewport() {
         let coordinateSpace = CaptureCoordinateSpace(
             viewport: CaptureViewport(rect: CGRect(x: 100, y: 50, width: 400, height: 300)),
             screenBounds: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1000, height: 800))
@@ -386,9 +519,7 @@ final class EditorViewModelTests: XCTestCase {
             target: .window
         )
 
-        XCTAssertEqual(normalized.count, 1)
-        XCTAssertEqual(normalized[0].location.x, 0.5, accuracy: 0.0001)
-        XCTAssertEqual(normalized[0].location.y, 0.5, accuracy: 0.0001)
+        XCTAssertTrue(normalized.isEmpty)
     }
 
     func testWindowPointerNormalizationDoesNotFallbackToScreenCoordinates() {
@@ -409,6 +540,28 @@ final class EditorViewModelTests: XCTestCase {
         )
 
         XCTAssertTrue(normalized.isEmpty)
+    }
+
+    func testWindowPointerNormalizationKeepsNearEdgeClicksWithSmallTolerance() {
+        let coordinateSpace = CaptureCoordinateSpace(
+            viewport: CaptureViewport(rect: CGRect(x: 100, y: 450, width: 400, height: 300)),
+            screenBounds: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        )
+        let event = PointerEvent(
+            timestamp: 0.4,
+            location: NormalizedPoint(x: 0.095, y: 0.4375),
+            type: .click
+        )
+
+        let normalized = HomeViewModel.normalizedPointerEvents(
+            [event],
+            coordinateSpace: coordinateSpace,
+            target: .window
+        )
+
+        XCTAssertEqual(normalized.count, 1)
+        XCTAssertEqual(normalized[0].location.x, 0, accuracy: 0.0001)
+        XCTAssertEqual(normalized[0].location.y, 1, accuracy: 0.0001)
     }
 
     func testScreenPointerNormalizationUsesAppKitCoordinates() {

@@ -78,18 +78,19 @@ final class CameraPlanEngine {
         var targetZoom: Double
         var startedAt: TimeInterval
         var duration: TimeInterval
+        var zoomDelay: TimeInterval
 
         func focus(at timestamp: TimeInterval) -> NormalizedPoint {
             sourceFocus.blended(toward: targetFocus, alpha: easedProgress(at: timestamp))
         }
 
         func zoom(at timestamp: TimeInterval) -> Double {
-            let progress = easedProgress(at: timestamp)
+            let progress = easedZoomProgress(at: timestamp)
             return sourceZoom + ((targetZoom - sourceZoom) * progress)
         }
 
         func isComplete(at timestamp: TimeInterval) -> Bool {
-            progress(at: timestamp) >= 1
+            progress(at: timestamp) >= 1 && zoomProgress(at: timestamp) >= 1
         }
 
         private func easedProgress(at timestamp: TimeInterval) -> Double {
@@ -97,8 +98,17 @@ final class CameraPlanEngine {
             return t * t * t * (t * ((t * 6) - 15) + 10)
         }
 
+        private func easedZoomProgress(at timestamp: TimeInterval) -> Double {
+            let t = zoomProgress(at: timestamp)
+            return t * t * t * (t * ((t * 6) - 15) + 10)
+        }
+
         private func progress(at timestamp: TimeInterval) -> Double {
             ((timestamp - startedAt) / max(duration, 0.0001)).clamped(to: 0...1)
+        }
+
+        private func zoomProgress(at timestamp: TimeInterval) -> Double {
+            ((timestamp - startedAt - zoomDelay) / max(duration, 0.0001)).clamped(to: 0...1)
         }
     }
 
@@ -111,15 +121,6 @@ final class CameraPlanEngine {
         case idle
         case transitioning
         case holding
-
-        var allowsWithinShotLead: Bool {
-            switch self {
-            case .idle, .holding:
-                true
-            case .transitioning:
-                false
-            }
-        }
     }
 
     private struct ShotState {
@@ -141,7 +142,8 @@ final class CameraPlanEngine {
             timestamp: TimeInterval,
             sourceFocus: NormalizedPoint,
             sourceZoom: Double,
-            transitionDuration: TimeInterval
+            transitionDuration: TimeInterval,
+            zoomDelay: TimeInterval
         ) {
             shot = Shot(anchor: anchor, targetZoom: targetZoom, startedAt: timestamp)
             transition = ShotTransition(
@@ -150,7 +152,8 @@ final class CameraPlanEngine {
                 targetFocus: anchor,
                 targetZoom: targetZoom,
                 startedAt: timestamp,
-                duration: transitionDuration
+                duration: transitionDuration,
+                zoomDelay: zoomDelay
             )
             phase = .transitioning
         }
@@ -169,6 +172,17 @@ final class CameraPlanEngine {
         }
 
         func canCommit(at timestamp: TimeInterval, minimumHold: TimeInterval) -> Bool {
+            switch phase {
+            case .idle:
+                true
+            case .transitioning:
+                false
+            case .holding:
+                timestamp - shot.startedAt >= minimumHold
+            }
+        }
+
+        func canCommitClick(at timestamp: TimeInterval, minimumHold: TimeInterval) -> Bool {
             switch phase {
             case .idle:
                 true
@@ -221,12 +235,9 @@ final class CameraPlanEngine {
             transition: nil
         )
         let shotTransitionDuration = shotTransitionDuration(for: clampedStrength)
+        let focusAnticipation = focusAnticipation(transitionDuration: shotTransitionDuration)
         let minimumShotHold = minimumShotHold(for: clampedStrength)
-        let baseCameraSmoothingAlpha = cameraSmoothingAlpha(for: clampedStrength)
-        let baseLeadSmoothingAlpha = withinShotLeadAlpha(for: clampedStrength)
-        let baseZoomSmoothingAlpha = zoomSmoothingAlpha(for: clampedStrength)
         var cameraFocus = NormalizedPoint.center
-        var shotLead = NormalizedPoint.center
         var zoom = baseZoom
         var candidate: CandidateRegion?
         var cameraActivated = false
@@ -234,12 +245,22 @@ final class CameraPlanEngine {
         var previousSampleTime = -0.0001
         var sampleTime = 0.0
         var lastActivityTime = firstClick.timestamp
+        var nextEventIndex = 0
 
         while sampleTime <= endTime + 0.0001 {
-            let eventsInWindow = sorted.filter { $0.timestamp > previousSampleTime && $0.timestamp <= sampleTime }
+            var eventsInWindow: [PointerEvent] = []
+            while nextEventIndex < sorted.count,
+                  sorted[nextEventIndex].timestamp <= sampleTime + focusAnticipation {
+                eventsInWindow.append(sorted[nextEventIndex])
+                nextEventIndex += 1
+            }
+            let visibleEventsInWindow = sorted.filter {
+                $0.timestamp > previousSampleTime && $0.timestamp <= sampleTime
+            }
 
             for event in eventsInWindow {
                 guard event.timestamp >= firstClick.timestamp else { continue }
+                guard event.type != .move else { continue }
                 lastActivityTime = event.timestamp
                 shotState.updatePhase(at: event.timestamp)
                 let eventPoint = targetFocus(for: event.location)
@@ -251,21 +272,26 @@ final class CameraPlanEngine {
                         followStrength: clampedStrength,
                         clickRule: clickRule
                     )
+                    let transitionStart = max(event.timestamp - focusAnticipation, 0)
                     shotState.commit(
                         anchor: eventPoint,
                         targetZoom: targetZoom,
-                        timestamp: event.timestamp,
+                        timestamp: transitionStart,
                         sourceFocus: .center,
                         sourceZoom: baseZoom,
-                        transitionDuration: shotTransitionDuration
+                        transitionDuration: shotTransitionDuration,
+                        zoomDelay: zoomTransitionDelay(
+                            eventTimestamp: event.timestamp,
+                            transitionStart: transitionStart,
+                            transitionDuration: shotTransitionDuration
+                        )
                     )
                     cameraActivated = true
                     candidate = nil
-                    shotLead = .center
                     continue
                 }
 
-                guard cameraActivated, event.type != .move else { continue }
+                guard cameraActivated else { continue }
                 candidate = updateCandidate(
                     with: event,
                     point: eventPoint,
@@ -289,16 +315,21 @@ final class CameraPlanEngine {
                         followStrength: clampedStrength,
                         clickRule: clickRule
                     )
+                    let transitionStart = max(event.timestamp - focusAnticipation, 0)
                     shotState.commit(
                         anchor: committed.center,
                         targetZoom: targetZoom,
-                        timestamp: event.timestamp,
+                        timestamp: transitionStart,
                         sourceFocus: cameraFocus,
                         sourceZoom: zoom,
-                        transitionDuration: shotTransitionDuration
+                        transitionDuration: shotTransitionDuration,
+                        zoomDelay: zoomTransitionDelay(
+                            eventTimestamp: event.timestamp,
+                            transitionStart: transitionStart,
+                            transitionDuration: shotTransitionDuration
+                        )
                     )
                     candidate = nil
-                    shotLead = cameraFocus
                 }
             }
 
@@ -327,59 +358,10 @@ final class CameraPlanEngine {
                 followStrength: clampedStrength
             )
 
-            if shotState.phase.allowsWithinShotLead {
-                let pointer = interpolatedPointer(at: sampleTime, from: sorted)
-                let leadTarget = desiredLeadTarget(
-                    anchor: composition.focus,
-                    pointer: targetFocus(for: pointer),
-                    phase: shotState.phase,
-                    idleProgress: idleProgress,
-                    followStrength: clampedStrength
-                )
-                let leadFilter = SmoothingFilter(
-                    alpha: smoothingAlpha(
-                        base: baseLeadSmoothingAlpha,
-                        idle: idleReturnLeadAlpha(for: clampedStrength),
-                        idleProgress: idleProgress
-                    )
-                )
-                shotLead = leadFilter.apply(current: shotLead, target: leadTarget)
-                let desiredFocus = desiredCameraFocus(
-                    anchor: composition.focus,
-                    lead: shotLead,
-                    followStrength: clampedStrength
-                )
-                let cameraFilter = SmoothingFilter(
-                    alpha: smoothingAlpha(
-                        base: baseCameraSmoothingAlpha,
-                        idle: idleReturnCameraAlpha(for: clampedStrength),
-                        idleProgress: idleProgress
-                    )
-                )
-                cameraFocus = cameraFilter.apply(current: cameraFocus, target: desiredFocus)
+            cameraFocus = composition.focus.blended(toward: .center, alpha: idleProgress)
+            zoom = composition.zoom + ((baseZoom - composition.zoom) * idleProgress)
 
-                let desiredZoom = desiredZoom(
-                    targetZoom: composition.zoom,
-                    anchor: composition.focus,
-                    lead: shotLead,
-                    phase: shotState.phase,
-                    idleProgress: idleProgress,
-                    baseZoom: baseZoom,
-                    followStrength: clampedStrength
-                )
-                let activeZoomAlpha = smoothingAlpha(
-                    base: baseZoomSmoothingAlpha,
-                    idle: idleReturnZoomAlpha(for: clampedStrength),
-                    idleProgress: idleProgress
-                )
-                zoom += (desiredZoom - zoom) * activeZoomAlpha
-            } else {
-                shotLead = composition.focus
-                cameraFocus = composition.focus
-                zoom = composition.zoom
-            }
-
-            let emphasis: CameraKeyframe.EmphasisKind = eventsInWindow.contains(where: { $0.type == .click }) ? .click : .none
+            let emphasis: CameraKeyframe.EmphasisKind = visibleEventsInWindow.contains(where: { $0.type == .click }) ? .click : .none
             keyframes.append(
                 CameraKeyframe(
                     timestamp: sampleTime,
@@ -419,7 +401,9 @@ final class CameraPlanEngine {
         followStrength: Double
     ) -> CandidateRegion? {
         let distanceFromAnchor = distance(from: currentAnchor, to: point)
-        let sameRegionRadius = sameRegionRadius(for: followStrength)
+        let sameRegionRadius = event.type == .click
+            ? clickSameRegionRadius(for: followStrength)
+            : sameRegionRadius(for: followStrength)
         guard distanceFromAnchor > sameRegionRadius else {
             return nil
         }
@@ -453,19 +437,23 @@ final class CameraPlanEngine {
         guard let candidate else { return nil }
 
         let distanceFromAnchor = distance(from: currentAnchor, to: candidate.center)
-        guard distanceFromAnchor >= transitionDistance(for: followStrength) else {
-            return nil
-        }
-
-        guard shotState.canCommit(at: currentTime, minimumHold: minimumHold) else {
+        let requiredDistance = candidate.clickCount > 0
+            ? clickTransitionDistance(for: followStrength)
+            : transitionDistance(for: followStrength)
+        guard distanceFromAnchor >= requiredDistance else {
             return nil
         }
 
         if candidate.clickCount > 0 {
-            let clickConfidence = 0.82 + (Double(candidate.clickCount) * 0.22)
-            if candidate.accumulatedWeight >= clickConfidence || candidate.dwellDuration >= 0.08 {
-                return candidate
-            }
+            guard shotState.canCommitClick(
+                at: currentTime,
+                minimumHold: clickMinimumShotHold(for: followStrength)
+            ) else { return nil }
+            return candidate
+        }
+
+        guard shotState.canCommit(at: currentTime, minimumHold: minimumHold) else {
+            return nil
         }
 
         if candidate.dwellDuration >= moveDwellDuration(for: followStrength),
@@ -476,108 +464,11 @@ final class CameraPlanEngine {
         return nil
     }
 
-    private func desiredLeadTarget(
-        anchor: NormalizedPoint,
-        pointer: NormalizedPoint,
-        phase: ShotPhase,
-        idleProgress: Double,
-        followStrength: Double
-    ) -> NormalizedPoint {
-        guard phase.allowsWithinShotLead else {
-            return anchor
-        }
-
-        let returnProgress = idleProgress.clamped(to: 0...1)
-        guard returnProgress < 0.999 else {
-            return anchor
-        }
-
-        let distanceToPointer = distance(from: anchor, to: pointer)
-        let deadZone = withinShotDeadZone(for: followStrength)
-        guard distanceToPointer > deadZone else {
-            return anchor
-        }
-
-        let normalizedDistance = ((distanceToPointer - deadZone) / max(1 - deadZone, 0.001)).clamped(to: 0...1)
-        let leadWeight = (0.05 + (followStrength * 0.04) + (normalizedDistance * 0.05)).clamped(to: 0.05...0.11)
-        let unclampedLead = anchor.blended(toward: pointer, alpha: leadWeight)
-        let activeLead = anchor.limitedToward(unclampedLead, maxDistance: maxLeadDistance(for: followStrength))
-        return activeLead.blended(toward: anchor, alpha: returnProgress)
-    }
-
-    private func desiredCameraFocus(
-        anchor: NormalizedPoint,
-        lead: NormalizedPoint,
-        followStrength: Double
-    ) -> NormalizedPoint {
-        let leadDistance = distance(from: anchor, to: lead)
-        guard leadDistance > 0.0001 else {
-            return anchor
-        }
-
-        let influence = (0.65 + (followStrength * 0.08)).clamped(to: 0.65...0.75)
-        return anchor.blended(toward: lead, alpha: influence)
-    }
-
-    private func desiredZoom(
-        targetZoom: Double,
-        anchor: NormalizedPoint,
-        lead: NormalizedPoint,
-        phase: ShotPhase,
-        idleProgress: Double,
-        baseZoom: Double,
-        followStrength: Double
-    ) -> Double {
-        guard phase.allowsWithinShotLead else {
-            return targetZoom
-        }
-
-        let leadDistance = distance(from: anchor, to: lead)
-        let leadBreathing = leadDistance * withinShotZoomLeadMultiplier(for: followStrength)
-        let activeZoom = targetZoom + leadBreathing
-        let returnProgress = idleProgress.clamped(to: 0...1)
-        let idleZoom = targetZoom - ((targetZoom - baseZoom) * idleZoomRelaxation(for: followStrength) * returnProgress)
-        return activeZoom + ((idleZoom - activeZoom) * returnProgress)
-    }
-
     private func idleReturnProgress(idleAge: TimeInterval, followStrength: Double) -> Double {
         let delay = idleReturnDelay(for: followStrength)
         let duration = idleReturnDuration(for: followStrength)
         let progress = ((idleAge - delay) / max(duration, 0.0001)).clamped(to: 0...1)
         return progress * progress * (3 - (2 * progress))
-    }
-
-    private func smoothingAlpha(base: Double, idle: Double, idleProgress: Double) -> Double {
-        base + ((idle - base) * idleProgress.clamped(to: 0...1))
-    }
-
-    private func interpolatedPointer(at timestamp: TimeInterval, from events: [PointerEvent]) -> NormalizedPoint {
-        guard let first = events.first else { return .center }
-
-        if timestamp <= first.timestamp {
-            return first.location
-        }
-
-        guard let last = events.last else {
-            return first.location
-        }
-
-        if timestamp >= last.timestamp {
-            return last.location
-        }
-
-        guard let upperIndex = events.firstIndex(where: { $0.timestamp >= timestamp }), upperIndex > 0 else {
-            return last.location
-        }
-
-        let lower = events[upperIndex - 1]
-        let upper = events[upperIndex]
-        let span = max(upper.timestamp - lower.timestamp, 0.0001)
-        let progress = ((timestamp - lower.timestamp) / span).clamped(to: 0...1)
-        return NormalizedPoint(
-            x: lower.location.x + ((upper.location.x - lower.location.x) * progress),
-            y: lower.location.y + ((upper.location.y - lower.location.y) * progress)
-        )
     }
 
     private func shotTargetZoom(
@@ -612,48 +503,23 @@ final class CameraPlanEngine {
     }
 
     private func samplingInterval(for followStrength: Double) -> TimeInterval {
-        let fps = 18 + Int((followStrength.clamped(to: 0.2...1.0) - 0.2) * 10)
-        return 1.0 / Double(fps)
+        1.0 / 60.0
     }
 
-    private func cameraSmoothingAlpha(for followStrength: Double) -> Double {
-        (0.11 + (followStrength * 0.07)).clamped(to: 0.11...0.18)
-    }
-
-    private func withinShotLeadAlpha(for followStrength: Double) -> Double {
-        (0.06 + (followStrength * 0.03)).clamped(to: 0.06...0.09)
-    }
-
-    private func zoomSmoothingAlpha(for followStrength: Double) -> Double {
-        (0.11 + (followStrength * 0.035)).clamped(to: 0.11...0.16)
+    private func focusAnticipation(transitionDuration: TimeInterval) -> TimeInterval {
+        transitionDuration
     }
 
     private func idleReturnDelay(for followStrength: Double) -> TimeInterval {
-        (0.58 - (followStrength * 0.10)).clamped(to: 0.44...0.58)
+        1.20
     }
 
     private func idleReturnDuration(for followStrength: Double) -> TimeInterval {
-        (0.78 - (followStrength * 0.10)).clamped(to: 0.62...0.78)
+        0.90
     }
 
     private func idleReturnTailDuration(for followStrength: Double) -> TimeInterval {
-        idleReturnDelay(for: followStrength) + idleReturnDuration(for: followStrength) + 0.65
-    }
-
-    private func idleZoomRelaxation(for followStrength: Double) -> Double {
-        (0.46 + (followStrength * 0.14)).clamped(to: 0.48...0.60)
-    }
-
-    private func idleReturnLeadAlpha(for followStrength: Double) -> Double {
-        (0.18 + (followStrength * 0.05)).clamped(to: 0.18...0.23)
-    }
-
-    private func idleReturnCameraAlpha(for followStrength: Double) -> Double {
-        (0.16 + (followStrength * 0.05)).clamped(to: 0.16...0.21)
-    }
-
-    private func idleReturnZoomAlpha(for followStrength: Double) -> Double {
-        (0.15 + (followStrength * 0.04)).clamped(to: 0.15...0.19)
+        idleReturnDelay(for: followStrength) + idleReturnDuration(for: followStrength) + 0.80
     }
 
     private func stableShotZoomLift(for followStrength: Double, zoomLevel: Double) -> Double {
@@ -662,12 +528,12 @@ final class CameraPlanEngine {
         return (motionLift + zoomLift).clamped(to: 0.014...0.58)
     }
 
-    private func withinShotZoomLeadMultiplier(for followStrength: Double) -> Double {
-        (0.026 + (followStrength * 0.018)).clamped(to: 0.026...0.044)
-    }
-
     private func sameRegionRadius(for followStrength: Double) -> Double {
         (0.13 - (followStrength * 0.02)).clamped(to: 0.10...0.13)
+    }
+
+    private func clickSameRegionRadius(for followStrength: Double) -> Double {
+        (0.065 - (followStrength * 0.015)).clamped(to: 0.045...0.065)
     }
 
     private func candidateMergeRadius(for followStrength: Double) -> Double {
@@ -678,12 +544,30 @@ final class CameraPlanEngine {
         (0.22 - (followStrength * 0.03)).clamped(to: 0.18...0.22)
     }
 
+    private func clickTransitionDistance(for followStrength: Double) -> Double {
+        (0.075 - (followStrength * 0.02)).clamped(to: 0.052...0.075)
+    }
+
     private func shotTransitionDuration(for followStrength: Double) -> TimeInterval {
-        (0.34 - (followStrength * 0.05)).clamped(to: 0.26...0.34)
+        0.58
+    }
+
+    private func zoomTransitionDelay(
+        eventTimestamp: TimeInterval,
+        transitionStart: TimeInterval,
+        transitionDuration: TimeInterval
+    ) -> TimeInterval {
+        let elapsedBeforeEvent = max(eventTimestamp - transitionStart, 0)
+        let zoomLeadAtClick: TimeInterval = 0.12
+        return max(elapsedBeforeEvent - zoomLeadAtClick, 0)
     }
 
     private func minimumShotHold(for followStrength: Double) -> TimeInterval {
         (0.44 - (followStrength * 0.08)).clamped(to: 0.28...0.44)
+    }
+
+    private func clickMinimumShotHold(for followStrength: Double) -> TimeInterval {
+        (0.18 - (followStrength * 0.06)).clamped(to: 0.10...0.18)
     }
 
     private func moveDwellDuration(for followStrength: Double) -> TimeInterval {
@@ -698,23 +582,8 @@ final class CameraPlanEngine {
         (0.34 - (followStrength * 0.06)).clamped(to: 0.22...0.34)
     }
 
-    private func withinShotDeadZone(for followStrength: Double) -> Double {
-        (0.082 - (followStrength * 0.014)).clamped(to: 0.06...0.082)
-    }
-
-    private func maxLeadDistance(for followStrength: Double) -> Double {
-        (0.044 + (followStrength * 0.012)).clamped(to: 0.044...0.056)
-    }
-
     private func targetFocus(for point: NormalizedPoint) -> NormalizedPoint {
-        let horizontalInset = 0.08
-        let topInset = 0.12
-        let bottomInset = 0.16
-
-        return NormalizedPoint(
-            x: point.x.clamped(to: horizontalInset...(1 - horizontalInset)),
-            y: point.y.clamped(to: topInset...(1 - bottomInset))
-        )
+        point
     }
 
     private func distance(from lhs: NormalizedPoint, to rhs: NormalizedPoint) -> Double {

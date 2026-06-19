@@ -199,6 +199,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
     let createdAt: Date
     let duration: TimeInterval
     let sourceVideoURL: URL?
+    let captureTarget: CaptureTarget
     let reconstructsCursor: Bool
     let events: [PointerEvent]
     let cameraKeyframes: [CameraKeyframe]
@@ -229,6 +230,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         createdAt: Date,
         duration: TimeInterval,
         sourceVideoURL: URL?,
+        captureTarget: CaptureTarget = .screen,
         reconstructsCursor: Bool = false,
         events: [PointerEvent],
         cameraKeyframes: [CameraKeyframe],
@@ -241,13 +243,14 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let safeDuration = max(duration, 0)
         let safeTrimRange = (trimRange ?? ProjectTrimRange(start: 0, end: safeDuration)).clamped(to: safeDuration)
         let proposedZoomSegments = manualZoomSegments.isEmpty && zoomTrackEdited == false
-            ? Self.autoZoomSegments(from: cameraKeyframes, duration: safeDuration)
+            ? Self.autoZoomSegments(from: events, keyframes: cameraKeyframes, duration: safeDuration)
             : manualZoomSegments
         self.id = id
         self.name = name
         self.createdAt = createdAt
         self.duration = safeDuration
         self.sourceVideoURL = sourceVideoURL
+        self.captureTarget = captureTarget
         self.reconstructsCursor = reconstructsCursor
         self.events = events
         self.cameraKeyframes = cameraKeyframes
@@ -264,6 +267,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         case createdAt
         case duration
         case sourceVideoURL
+        case captureTarget
         case reconstructsCursor
         case events
         case cameraKeyframes
@@ -281,6 +285,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let createdAt = try container.decode(Date.self, forKey: .createdAt)
         let duration = try container.decode(TimeInterval.self, forKey: .duration)
         let sourceVideoURL = try container.decodeIfPresent(URL.self, forKey: .sourceVideoURL)
+        let captureTarget = try container.decodeIfPresent(CaptureTarget.self, forKey: .captureTarget) ?? .screen
         let reconstructsCursor = try container.decodeIfPresent(Bool.self, forKey: .reconstructsCursor) ?? false
         let events = try container.decode([PointerEvent].self, forKey: .events)
         let cameraKeyframes = try container.decode([CameraKeyframe].self, forKey: .cameraKeyframes)
@@ -296,6 +301,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             createdAt: createdAt,
             duration: duration,
             sourceVideoURL: sourceVideoURL,
+            captureTarget: captureTarget,
             reconstructsCursor: reconstructsCursor,
             events: events,
             cameraKeyframes: cameraKeyframes,
@@ -314,6 +320,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(duration, forKey: .duration)
         try container.encodeIfPresent(sourceVideoURL, forKey: .sourceVideoURL)
+        try container.encode(captureTarget, forKey: .captureTarget)
         try container.encode(reconstructsCursor, forKey: .reconstructsCursor)
         try container.encode(events, forKey: .events)
         try container.encode(cameraKeyframes, forKey: .cameraKeyframes)
@@ -344,6 +351,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             createdAt: createdAt,
             duration: nextDuration,
             sourceVideoURL: sourceVideoURL,
+            captureTarget: captureTarget,
             reconstructsCursor: reconstructsCursor,
             events: events,
             cameraKeyframes: cameraKeyframes,
@@ -458,50 +466,50 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         }
     }
 
-    static func autoZoomSegments(from keyframes: [CameraKeyframe], duration: TimeInterval) -> [ManualZoomSegment] {
+    static func autoZoomSegments(from events: [PointerEvent], keyframes: [CameraKeyframe], duration: TimeInterval) -> [ManualZoomSegment] {
         let safeDuration = max(duration, 0)
         guard safeDuration > 0 else { return [] }
 
-        let threshold = 1.025
-        let sorted = keyframes.sorted { $0.timestamp < $1.timestamp }
-        var segments: [ManualZoomSegment] = []
-        var activeFrames: [CameraKeyframe] = []
+        let clickEvents = events
+            .filter { $0.type == .click }
+            .sorted { $0.timestamp < $1.timestamp }
+        guard clickEvents.isEmpty == false else { return [] }
 
-        func flushActiveFrames() {
-            guard let first = activeFrames.first, let last = activeFrames.last else {
-                activeFrames = []
-                return
-            }
+        let composer = FrameComposer()
+        let anticipation: TimeInterval = 0.08
+        let tail: TimeInterval = 2.2
+        let settleOffset: TimeInterval = 0.55
 
-            let start = max(first.timestamp - 0.08, 0)
-            let end = min(last.timestamp + 0.22, safeDuration)
-            guard end - start >= ManualZoomSegment.minimumDuration else {
-                activeFrames = []
-                return
-            }
+        return clickEvents.enumerated().compactMap { index, click in
+            let start = max(click.timestamp - anticipation, 0)
+            let naturalEnd = min(click.timestamp + tail, safeDuration)
+            let nextStart = clickEvents.indices.contains(index + 1)
+                ? max(clickEvents[index + 1].timestamp - anticipation, 0)
+                : safeDuration
+            let end = min(naturalEnd, nextStart)
+            guard end - start >= ManualZoomSegment.minimumDuration else { return nil }
 
-            let peakFrame = activeFrames.max { $0.zoom < $1.zoom } ?? last
-            segments.append(
-                ManualZoomSegment(
-                    start: start,
-                    end: end,
-                    focus: peakFrame.focus,
-                    zoomLevel: peakFrame.zoom.clamped(to: ManualZoomSegment.zoomRange),
-                    source: .auto
-                )
+            let settledSnapshot = composer.snapshot(
+                at: min(click.timestamp + settleOffset, safeDuration),
+                from: keyframes
             )
-            activeFrames = []
-        }
+            let zoomLevel = max(settledSnapshot.zoom, 1.28)
+                .clamped(to: ManualZoomSegment.zoomRange)
 
-        for frame in sorted {
-            if frame.zoom > threshold {
-                activeFrames.append(frame)
-            } else {
-                flushActiveFrames()
-            }
+            return ManualZoomSegment(
+                start: start,
+                end: end,
+                focus: click.location,
+                zoomLevel: zoomLevel,
+                easeInDuration: anticipation,
+                easeOutDuration: 0,
+                source: .auto
+            )
         }
-        flushActiveFrames()
-        return segments
+    }
+
+    static func autoZoomSegments(from keyframes: [CameraKeyframe], duration: TimeInterval) -> [ManualZoomSegment] {
+        autoZoomSegments(from: [], keyframes: keyframes, duration: duration)
     }
 
     private static func nonOverlappingManualSegments(_ segments: [ManualZoomSegment]) -> [ManualZoomSegment] {
@@ -552,8 +560,58 @@ struct RecordingProject: Identifiable, Codable, Equatable {
 struct FileLayout {
     let root: URL
     let metadataURL: URL
+    let coordinateDiagnosticsURL: URL
     let previewDirectoryURL: URL
     let exportDirectoryURL: URL
+}
+
+struct CoordinateDiagnostics: Codable, Equatable {
+    struct EventSample: Codable, Equatable {
+        let id: UUID
+        let timestamp: TimeInterval
+        let type: PointerEventType
+        let legacyNormalizedLocation: NormalizedPoint
+        let globalLocation: PointerGlobalLocation?
+    }
+
+    struct NormalizedSample: Codable, Equatable {
+        let id: UUID
+        let timestamp: TimeInterval
+        let type: PointerEventType
+        let location: NormalizedPoint
+        let globalLocation: PointerGlobalLocation?
+    }
+
+    struct ClickAlignment: Codable, Equatable {
+        let id: UUID
+        let timestamp: TimeInterval
+        let clickLocation: NormalizedPoint
+        let cameraFocusAtClick: NormalizedPoint
+        let cameraFocusAfterSettle: NormalizedPoint
+        let renderedFocusAtClick: NormalizedPoint
+        let renderedFocusAfterSettle: NormalizedPoint
+        let focusOffsetAtClick: Double
+        let focusOffsetAfterSettle: Double
+        let renderedFocusOffsetAtClick: Double
+        let renderedFocusOffsetAfterSettle: Double
+    }
+
+    let projectID: UUID
+    let captureTarget: CaptureTarget
+    let coordinateSpace: CaptureCoordinateSpace?
+    let sessionStartedAt: Date
+    let mediaStartedAt: Date?
+    let pointerTimelineOffset: TimeInterval
+    let sessionDuration: TimeInterval
+    let projectDuration: TimeInterval
+    let rawEventCount: Int
+    let normalizedEventCount: Int
+    let rawClickCount: Int
+    let normalizedClickCount: Int
+    let rawClicks: [EventSample]
+    let normalizedClicks: [NormalizedSample]
+    let droppedClicks: [EventSample]
+    let clickAlignments: [ClickAlignment]
 }
 
 final class ProjectStore {
@@ -574,6 +632,7 @@ final class ProjectStore {
 
     func createProject(
         from session: CaptureSession,
+        rawEvents: [PointerEvent] = [],
         events: [PointerEvent],
         keyframes: [CameraKeyframe],
         style: ProjectStyle
@@ -592,6 +651,7 @@ final class ProjectStore {
             createdAt: createdAt,
             duration: measuredSourceDuration ?? max(session.duration, keyframes.last?.timestamp ?? 6),
             sourceVideoURL: persistedSourceURL,
+            captureTarget: session.configuration.target,
             reconstructsCursor: true,
             events: events,
             cameraKeyframes: keyframes,
@@ -599,6 +659,13 @@ final class ProjectStore {
         )
 
         try save(project: project)
+        try saveCoordinateDiagnostics(
+            for: project,
+            session: session,
+            rawEvents: rawEvents,
+            normalizedEvents: events,
+            keyframes: keyframes
+        )
         return project
     }
 
@@ -638,6 +705,103 @@ final class ProjectStore {
 
     func previewDirectory(for project: RecordingProject) -> URL {
         layout(for: project.id).previewDirectoryURL
+    }
+
+    func coordinateDiagnosticsURL(for project: RecordingProject) -> URL {
+        layout(for: project.id).coordinateDiagnosticsURL
+    }
+
+    private func saveCoordinateDiagnostics(
+        for project: RecordingProject,
+        session: CaptureSession,
+        rawEvents: [PointerEvent],
+        normalizedEvents: [PointerEvent],
+        keyframes: [CameraKeyframe]
+    ) throws {
+        let layout = layout(for: project.id)
+        try FileManager.default.createDirectory(at: layout.root, withIntermediateDirectories: true, attributes: nil)
+
+        let rawClicks = rawEvents.filter { $0.type == .click }
+        let normalizedClicks = normalizedEvents.filter { $0.type == .click }
+        let normalizedClickIDs = Set(normalizedClicks.map(\.id))
+        let composer = FrameComposer()
+        let diagnostics = CoordinateDiagnostics(
+            projectID: project.id,
+            captureTarget: session.configuration.target,
+            coordinateSpace: session.coordinateSpace,
+            sessionStartedAt: session.startedAt,
+            mediaStartedAt: session.mediaStartedAt,
+            pointerTimelineOffset: session.mediaStartedAt?.timeIntervalSince(session.startedAt) ?? 0,
+            sessionDuration: session.duration,
+            projectDuration: project.duration,
+            rawEventCount: rawEvents.count,
+            normalizedEventCount: normalizedEvents.count,
+            rawClickCount: rawClicks.count,
+            normalizedClickCount: normalizedClicks.count,
+            rawClicks: rawClicks.map(Self.eventSample),
+            normalizedClicks: normalizedClicks.map(Self.normalizedSample),
+            droppedClicks: rawClicks
+                .filter { normalizedClickIDs.contains($0.id) == false }
+                .map(Self.eventSample),
+            clickAlignments: normalizedClicks.map { click in
+                let atClick = composer.snapshot(at: click.timestamp, from: keyframes)
+                let afterSettle = composer.snapshot(at: click.timestamp + 0.55, from: keyframes)
+                let renderedAtClick = composer.snapshot(
+                    at: click.timestamp,
+                    from: keyframes,
+                    manualZoomSegments: project.manualZoomSegments,
+                    zoomTrackEdited: project.zoomTrackEdited
+                )
+                let renderedAfterSettle = composer.snapshot(
+                    at: click.timestamp + 0.55,
+                    from: keyframes,
+                    manualZoomSegments: project.manualZoomSegments,
+                    zoomTrackEdited: project.zoomTrackEdited
+                )
+                return CoordinateDiagnostics.ClickAlignment(
+                    id: click.id,
+                    timestamp: click.timestamp,
+                    clickLocation: click.location,
+                    cameraFocusAtClick: atClick.focus,
+                    cameraFocusAfterSettle: afterSettle.focus,
+                    renderedFocusAtClick: renderedAtClick.focus,
+                    renderedFocusAfterSettle: renderedAfterSettle.focus,
+                    focusOffsetAtClick: Self.distance(from: click.location, to: atClick.focus),
+                    focusOffsetAfterSettle: Self.distance(from: click.location, to: afterSettle.focus),
+                    renderedFocusOffsetAtClick: Self.distance(from: click.location, to: renderedAtClick.focus),
+                    renderedFocusOffsetAfterSettle: Self.distance(from: click.location, to: renderedAfterSettle.focus)
+                )
+            }
+        )
+
+        let data = try encoder.encode(diagnostics)
+        try data.write(to: layout.coordinateDiagnosticsURL, options: .atomic)
+    }
+
+    private static func eventSample(_ event: PointerEvent) -> CoordinateDiagnostics.EventSample {
+        CoordinateDiagnostics.EventSample(
+            id: event.id,
+            timestamp: event.timestamp,
+            type: event.type,
+            legacyNormalizedLocation: event.location,
+            globalLocation: event.globalLocation
+        )
+    }
+
+    private static func normalizedSample(_ event: PointerEvent) -> CoordinateDiagnostics.NormalizedSample {
+        CoordinateDiagnostics.NormalizedSample(
+            id: event.id,
+            timestamp: event.timestamp,
+            type: event.type,
+            location: event.location,
+            globalLocation: event.globalLocation
+        )
+    }
+
+    private static func distance(from lhs: NormalizedPoint, to rhs: NormalizedPoint) -> Double {
+        let dx = lhs.x - rhs.x
+        let dy = lhs.y - rhs.y
+        return sqrt((dx * dx) + (dy * dy))
     }
 
     private func persistSourceMediaIfNeeded(from sourceURL: URL?, for id: UUID) throws -> URL? {
@@ -682,6 +846,7 @@ final class ProjectStore {
         return FileLayout(
             root: root,
             metadataURL: root.appendingPathComponent("project.json"),
+            coordinateDiagnosticsURL: root.appendingPathComponent("coordinate-diagnostics.json"),
             previewDirectoryURL: root.appendingPathComponent("Previews", isDirectory: true),
             exportDirectoryURL: root.appendingPathComponent("Exports", isDirectory: true)
         )

@@ -145,13 +145,15 @@ struct PreviewCanvasView: View {
             let frameSnapshot = FrameComposer().snapshot(
                 at: sourceTimestamp,
                 from: project.cameraKeyframes,
-                manualZoomSegments: project.manualZoomSegments
+                manualZoomSegments: project.manualZoomSegments,
+                zoomTrackEdited: project.zoomTrackEdited
             )
             let pointerSnapshot = PointerTimeline().snapshot(at: sourceTimestamp, from: project.events, smoothing: .raw)
             let previewGeometry = RealtimePreviewGeometry(
                 sourceSize: sourceSize,
-                contentRect: CGRect(origin: .zero, size: contentRect.size),
-                snapshot: frameSnapshot
+                contentRect: contentRect,
+                snapshot: frameSnapshot,
+                preservesFullSourceAtBase: true
             )
             let cornerRadius = max(project.style.cornerRadius, 0)
 
@@ -163,7 +165,9 @@ struct PreviewCanvasView: View {
                         url: url,
                         seekTime: activePlaybackSeekTime,
                         pointerSnapshot: pointerSnapshot,
+                        frameSnapshot: frameSnapshot,
                         realtimeGeometry: previewGeometry,
+                        contentCornerRadius: cornerRadius,
                         showsReconstructedCursor: project.reconstructsCursor,
                         onPlaybackTimeChange: { playbackTime in
                             updateTimelineFromPlayback(playbackTime, usesSourceTimeline: true)
@@ -172,23 +176,20 @@ struct PreviewCanvasView: View {
                             onPlaybackEnded()
                         }
                     )
-                    .frame(
-                        width: contentRect.width,
-                        height: contentRect.height
-                    )
-                    .position(x: contentRect.width / 2, y: contentRect.height / 2)
+                    .frame(width: stageSize.width, height: stageSize.height)
+                    .position(x: stageSize.width / 2, y: stageSize.height / 2)
 
                     if let selectedManualZoomSegment {
                         ManualZoomFocusOverlay(
                             segment: selectedManualZoomSegment,
                             onFocusChange: onManualZoomFocusChange
                         )
+                        .frame(width: contentRect.width, height: contentRect.height)
+                        .position(x: contentRect.midX, y: contentRect.midY)
                         .zIndex(20)
                     }
                 }
-                .frame(width: contentRect.width, height: contentRect.height)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .position(x: contentRect.midX, y: contentRect.midY)
+                .frame(width: stageSize.width, height: stageSize.height)
 
                 if project.reconstructsCursor && project.events.isEmpty {
                     Text("No pointer events captured")
@@ -399,12 +400,14 @@ struct RealtimePreviewGeometry {
     let sourceSize: CGSize
     let contentRect: CGRect
     let cropRect: CGRect
+    let displayRect: CGRect
     let videoFrame: CGRect
 
     init(
         sourceSize: CGSize,
         contentRect: CGRect,
         snapshot: FrameSnapshot,
+        preservesFullSourceAtBase: Bool = false,
         cropPlanner: SourceCropPlanner = SourceCropPlanner()
     ) {
         let safeSourceSize = CGSize(
@@ -418,38 +421,39 @@ struct RealtimePreviewGeometry {
             height: max(contentRect.height, 1)
         )
         let sourceExtent = CGRect(origin: .zero, size: safeSourceSize)
-        let cropRect = cropPlanner.cropRect(
+        let presentation = cropPlanner.presentation(
             for: sourceExtent,
-            outputAspectRatio: safeContentRect.width / max(safeContentRect.height, 1),
-            snapshot: snapshot
+            contentRect: safeContentRect,
+            snapshot: snapshot,
+            preservesFullSourceAtBase: preservesFullSourceAtBase
         )
-        let scale = max(safeContentRect.width / max(cropRect.width, 1), safeContentRect.height / max(cropRect.height, 1))
+        let cropRect = presentation.cropRect
+        let displayRect = presentation.displayRect
+        let scale = max(displayRect.width / max(cropRect.width, 1), displayRect.height / max(cropRect.height, 1))
         let frameSize = CGSize(
             width: safeSourceSize.width * scale,
             height: safeSourceSize.height * scale
         )
         let cropTop = safeSourceSize.height - cropRect.maxY
         let frameOrigin = CGPoint(
-            x: safeContentRect.minX - (cropRect.minX * scale),
-            y: safeContentRect.minY - (cropTop * scale)
+            x: displayRect.minX - (cropRect.minX * scale),
+            y: displayRect.minY - (cropTop * scale)
         )
 
         self.sourceSize = safeSourceSize
         self.contentRect = safeContentRect
         self.cropRect = cropRect
+        self.displayRect = displayRect
         self.videoFrame = CGRect(origin: frameOrigin, size: frameSize)
     }
 
     func contentPoint(for normalizedPoint: NormalizedPoint) -> CGPoint {
-        let sourceX = CGFloat(normalizedPoint.x) * sourceSize.width
-        let sourceTopY = CGFloat(normalizedPoint.y) * sourceSize.height
-        let cropTop = sourceSize.height - cropRect.maxY
-        let relativeX = ((sourceX - cropRect.minX) / max(cropRect.width, 1)).clamped(to: 0...1)
-        let relativeY = ((sourceTopY - cropTop) / max(cropRect.height, 1)).clamped(to: 0...1)
-
-        return CGPoint(
-            x: contentRect.minX + (relativeX * contentRect.width),
-            y: contentRect.minY + (relativeY * contentRect.height)
+        SourceCropPlanner().mappedContentPoint(
+            for: normalizedPoint,
+            in: CGRect(origin: .zero, size: sourceSize),
+            cropRect: cropRect,
+            layout: RenderLayout(renderSize: contentRect.size, padding: 0),
+            displayRect: displayRect
         )
     }
 }
@@ -458,7 +462,9 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     let url: URL
     let seekTime: TimeInterval
     var pointerSnapshot: PointerSnapshot?
+    var frameSnapshot: FrameSnapshot?
     var realtimeGeometry: RealtimePreviewGeometry?
+    var contentCornerRadius: CGFloat = 0
     var showsReconstructedCursor = false
     let onPlaybackTimeChange: (TimeInterval) -> Void
     let onPlaybackEnded: () -> Void
@@ -478,7 +484,9 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
         context.coordinator.onPlaybackEnded = onPlaybackEnded
         nsView.updateRealtimeOverlay(
             snapshot: pointerSnapshot,
+            frameSnapshot: frameSnapshot,
             geometry: realtimeGeometry,
+            cornerRadius: contentCornerRadius,
             showsCursor: showsReconstructedCursor
         )
 
@@ -635,9 +643,12 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
 
 private final class StablePlayerContainerView: NSView {
     let playerView = StableAVPlayerView()
+    private let videoClipView = FlippedVideoClipView()
+    private let videoClipMaskLayer = CAShapeLayer()
     private let cursorOverlayView = CursorOverlayView()
     private let controlsView = PlaybackControlsView()
     private var realtimeGeometry: RealtimePreviewGeometry?
+    private var contentCornerRadius: CGFloat = 0
 
     override var isFlipped: Bool { true }
 
@@ -645,6 +656,12 @@ private final class StablePlayerContainerView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+
+        videoClipView.wantsLayer = true
+        videoClipView.layer?.backgroundColor = NSColor.clear.cgColor
+        videoClipView.layer?.masksToBounds = true
+        videoClipView.layer?.mask = videoClipMaskLayer
+        videoClipView.translatesAutoresizingMaskIntoConstraints = true
 
         playerView.controlsStyle = .none
         playerView.videoGravity = .resizeAspectFill
@@ -656,7 +673,8 @@ private final class StablePlayerContainerView: NSView {
 
         controlsView.translatesAutoresizingMaskIntoConstraints = true
 
-        addSubview(playerView)
+        addSubview(videoClipView)
+        videoClipView.addSubview(playerView)
         addSubview(cursorOverlayView)
         addSubview(controlsView)
 
@@ -685,7 +703,17 @@ private final class StablePlayerContainerView: NSView {
             width: max(bounds.width - 24, 120),
             height: controlsHeight
         )
-        playerView.frame = realtimeGeometry?.videoFrame ?? bounds
+        applyVideoGeometry()
+        if let geometry = realtimeGeometry {
+            playerView.frame = geometry.videoFrame.offsetBy(
+                dx: -geometry.displayRect.minX,
+                dy: -geometry.displayRect.minY
+            )
+        } else {
+            playerView.frame = videoClipView.bounds
+        }
+        controlsView.layer?.zPosition = 100
+        cursorOverlayView.layer?.zPosition = 50
     }
 
     func setPlayer(_ player: AVPlayer?) {
@@ -696,14 +724,27 @@ private final class StablePlayerContainerView: NSView {
 
     func updateRealtimeOverlay(
         snapshot: PointerSnapshot?,
+        frameSnapshot: FrameSnapshot?,
         geometry: RealtimePreviewGeometry?,
+        cornerRadius: CGFloat,
         showsCursor: Bool
     ) {
         realtimeGeometry = geometry
-        playerView.frame = geometry?.videoFrame ?? bounds
+        contentCornerRadius = max(cornerRadius, 0)
+        applyVideoGeometry()
+        if let geometry {
+            playerView.frame = geometry.videoFrame.offsetBy(
+                dx: -geometry.displayRect.minX,
+                dy: -geometry.displayRect.minY
+            )
+        } else {
+            playerView.frame = videoClipView.bounds
+        }
         cursorOverlayView.snapshot = snapshot
+        cursorOverlayView.cameraFocus = frameSnapshot?.focus
         cursorOverlayView.geometry = geometry
         cursorOverlayView.showsCursor = showsCursor
+        cursorOverlayView.showsDebugOverlay = ProcessInfo.processInfo.environment["MOUSELENS_DEBUG_COORDINATES"] == "1"
         cursorOverlayView.needsDisplay = true
         needsLayout = true
         controlsView.updateState()
@@ -712,6 +753,28 @@ private final class StablePlayerContainerView: NSView {
     func updatePlaybackProgress() {
         controlsView.updateState()
     }
+
+    private func applyVideoGeometry() {
+        videoClipView.frame = realtimeGeometry?.displayRect ?? bounds
+        videoClipView.layer?.cornerRadius = contentCornerRadius
+        videoClipView.layer?.masksToBounds = true
+        updateVideoMask()
+    }
+
+    private func updateVideoMask() {
+        let clipBounds = videoClipView.bounds
+        videoClipMaskLayer.frame = clipBounds
+        videoClipMaskLayer.path = CGPath(
+            roundedRect: clipBounds,
+            cornerWidth: contentCornerRadius,
+            cornerHeight: contentCornerRadius,
+            transform: nil
+        )
+    }
+}
+
+private final class FlippedVideoClipView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 private final class StableAVPlayerView: AVPlayerView {
@@ -865,8 +928,10 @@ private final class PlaybackControlsView: NSView {
 
 private final class CursorOverlayView: NSView {
     var snapshot: PointerSnapshot?
+    var cameraFocus: NormalizedPoint?
     var geometry: RealtimePreviewGeometry?
     var showsCursor = false
+    var showsDebugOverlay = false
 
     override var isFlipped: Bool { true }
 
@@ -895,6 +960,10 @@ private final class CursorOverlayView: NSView {
 
         if showsCursor {
             drawCursor(at: overlayPoint(for: snapshot.location, geometry: geometry))
+        }
+
+        if showsDebugOverlay {
+            drawDebugCalibration(snapshot: snapshot, cameraFocus: cameraFocus, geometry: geometry)
         }
     }
 
@@ -948,6 +1017,50 @@ private final class CursorOverlayView: NSView {
         NSColor.black.withAlphaComponent(0.72).setStroke()
         path.lineWidth = 1.6
         path.stroke()
+    }
+
+    private func drawDebugCalibration(snapshot: PointerSnapshot, cameraFocus: NormalizedPoint?, geometry: RealtimePreviewGeometry) {
+        drawDebugCross(
+            at: overlayPoint(for: snapshot.rawLocation, geometry: geometry),
+            color: NSColor.systemYellow,
+            label: "raw"
+        )
+
+        if let clickLocation = snapshot.clickLocation {
+            drawDebugCross(
+                at: overlayPoint(for: clickLocation, geometry: geometry),
+                color: NSColor.systemRed,
+                label: "click"
+            )
+        }
+
+        if let cameraFocus {
+            drawDebugCross(
+                at: overlayPoint(for: cameraFocus, geometry: geometry),
+                color: NSColor.systemPurple,
+                label: "focus"
+            )
+        }
+    }
+
+    private func drawDebugCross(at point: CGPoint, color: NSColor, label: String) {
+        color.setStroke()
+        let path = NSBezierPath()
+        path.move(to: CGPoint(x: point.x - 7, y: point.y))
+        path.line(to: CGPoint(x: point.x + 7, y: point.y))
+        path.move(to: CGPoint(x: point.x, y: point.y - 7))
+        path.line(to: CGPoint(x: point.x, y: point.y + 7))
+        path.lineWidth = 2
+        path.stroke()
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: color
+        ]
+        NSString(string: label).draw(
+            at: CGPoint(x: point.x + 9, y: point.y - 7),
+            withAttributes: attributes
+        )
     }
 }
 

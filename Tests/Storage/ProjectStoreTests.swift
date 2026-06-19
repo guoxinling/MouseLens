@@ -2,6 +2,23 @@ import XCTest
 @testable import MouseLens
 
 final class ProjectStoreTests: XCTestCase {
+    func testCaptureSessionDurationUsesFirstMediaFrameWhenAvailable() {
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let mediaStartedAt = startedAt.addingTimeInterval(0.35)
+        let endedAt = startedAt.addingTimeInterval(4)
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .screen, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: startedAt,
+            mediaStartedAt: mediaStartedAt,
+            endedAt: endedAt,
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+
+        XCTAssertEqual(session.duration, 3.65, accuracy: 0.0001)
+    }
+
     func testCreateProjectPersistsMetadata() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ProjectStore(rootDirectoryURL: directory)
@@ -9,6 +26,7 @@ final class ProjectStoreTests: XCTestCase {
             id: UUID(),
             configuration: .init(target: .screen, includeMicrophone: true, includeSystemAudio: false),
             startedAt: Date(),
+            mediaStartedAt: nil,
             endedAt: Date().addingTimeInterval(3),
             rawCaptureURL: nil,
             coordinateSpace: nil
@@ -33,10 +51,99 @@ final class ProjectStoreTests: XCTestCase {
         let savedProject = try XCTUnwrap(recents.first)
         XCTAssertEqual(savedProject.id, project.id)
         XCTAssertEqual(savedProject.style.aspectRatio, .landscape)
+        XCTAssertEqual(savedProject.captureTarget, .screen)
         XCTAssertTrue(savedProject.reconstructsCursor)
         XCTAssertEqual(savedProject.trimRange.start, 0, accuracy: 0.0001)
         XCTAssertEqual(savedProject.trimRange.end, project.duration, accuracy: 0.0001)
         XCTAssertTrue(savedProject.manualZoomSegments.isEmpty)
+    }
+
+    func testCreateProjectWritesCoordinateDiagnostics() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let rawClick = PointerEvent(
+            timestamp: 0.2,
+            location: NormalizedPoint(x: 0.9, y: 0.9),
+            globalLocation: PointerGlobalLocation(x: 300, y: 600),
+            type: .click
+        )
+        let normalizedClick = PointerEvent(
+            id: rawClick.id,
+            timestamp: 0.2,
+            location: NormalizedPoint(x: 0.4, y: 0.3),
+            globalLocation: rawClick.globalLocation,
+            type: .click
+        )
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .screen, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: Date(),
+            mediaStartedAt: nil,
+            endedAt: Date().addingTimeInterval(3),
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+
+        let project = try store.createProject(
+            from: session,
+            rawEvents: [rawClick],
+            events: [normalizedClick],
+            keyframes: [
+                CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0),
+                CameraKeyframe(timestamp: 0.7, focus: NormalizedPoint(x: 0.4, y: 0.3), zoom: 1.7)
+            ],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            )
+        )
+
+        let data = try Data(contentsOf: store.coordinateDiagnosticsURL(for: project))
+        let diagnostics = try JSONDecoder().decode(CoordinateDiagnostics.self, from: data)
+
+        XCTAssertEqual(diagnostics.rawClickCount, 1)
+        XCTAssertEqual(diagnostics.normalizedClickCount, 1)
+        XCTAssertEqual(diagnostics.pointerTimelineOffset, 0, accuracy: 0.0001)
+        XCTAssertTrue(diagnostics.droppedClicks.isEmpty)
+        let alignment = try XCTUnwrap(diagnostics.clickAlignments.first)
+        XCTAssertEqual(alignment.clickLocation.x, 0.4, accuracy: 0.0001)
+    }
+
+    func testCreateProjectPersistsWindowCaptureTarget() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .window, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: Date(),
+            mediaStartedAt: nil,
+            endedAt: Date().addingTimeInterval(3),
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+
+        let project = try store.createProject(
+            from: session,
+            events: [],
+            keyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            )
+        )
+
+        XCTAssertEqual(project.captureTarget, .window)
+        XCTAssertEqual(try store.loadRecentProjects(limit: 1).first?.captureTarget, .window)
     }
 
     func testLegacyProjectWithoutTrimRangeDefaultsToFullDuration() throws {
@@ -199,7 +306,9 @@ final class ProjectStoreTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_776_368_400),
             duration: 4,
             sourceVideoURL: nil,
-            events: [],
+            events: [
+                PointerEvent(timestamp: 1.0, location: .init(x: 0.2, y: 0.3), type: .click)
+            ],
             cameraKeyframes: [
                 CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0),
                 CameraKeyframe(timestamp: 1.0, focus: .init(x: 0.2, y: 0.3), zoom: 1.55),
@@ -220,8 +329,54 @@ final class ProjectStoreTests: XCTestCase {
         let segment = try XCTUnwrap(project.manualZoomSegments.first)
         XCTAssertEqual(project.manualZoomSegments.count, 1)
         XCTAssertEqual(segment.source, .auto)
-        XCTAssertEqual(segment.zoomLevel, 1.7, accuracy: 0.0001)
-        XCTAssertEqual(segment.focus.x, 0.25, accuracy: 0.0001)
+        XCTAssertGreaterThan(segment.zoomLevel, 1.25)
+        XCTAssertEqual(segment.focus.x, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(segment.focus.y, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(segment.easeInDuration, 0.08, accuracy: 0.0001)
+        XCTAssertEqual(segment.easeOutDuration, 0, accuracy: 0.0001)
+    }
+
+    func testAutoZoomSegmentsFollowEachClickInsteadOfReusingPeakFrameFocus() throws {
+        let project = RecordingProject(
+            id: UUID(),
+            name: "ClickAnchoredAutoZoomTrack",
+            createdAt: Date(timeIntervalSince1970: 1_776_368_400),
+            duration: 8,
+            sourceVideoURL: nil,
+            events: [
+                PointerEvent(timestamp: 1.0, location: .init(x: 0.12, y: 0.18), type: .click),
+                PointerEvent(timestamp: 3.0, location: .init(x: 0.82, y: 0.20), type: .click),
+                PointerEvent(timestamp: 4.2, location: .init(x: 0.52, y: 0.52), type: .click)
+            ],
+            cameraKeyframes: [
+                CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0),
+                CameraKeyframe(timestamp: 1.5, focus: .init(x: 0.12, y: 0.18), zoom: 1.45),
+                CameraKeyframe(timestamp: 3.5, focus: .init(x: 0.82, y: 0.20), zoom: 1.6),
+                CameraKeyframe(timestamp: 4.7, focus: .init(x: 0.52, y: 0.52), zoom: 1.5),
+                CameraKeyframe(timestamp: 7, focus: .center, zoom: 1.0)
+            ],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 26,
+                shadowRadius: 30,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            )
+        )
+
+        XCTAssertEqual(project.manualZoomSegments.count, 3)
+        XCTAssertEqual(project.manualZoomSegments[0].focus.x, 0.12, accuracy: 0.0001)
+        XCTAssertEqual(project.manualZoomSegments[0].focus.y, 0.18, accuracy: 0.0001)
+        XCTAssertEqual(project.manualZoomSegments[1].focus.x, 0.82, accuracy: 0.0001)
+        XCTAssertEqual(project.manualZoomSegments[1].focus.y, 0.20, accuracy: 0.0001)
+        XCTAssertEqual(project.manualZoomSegments[2].focus.x, 0.52, accuracy: 0.0001)
+        XCTAssertEqual(project.manualZoomSegments[2].focus.y, 0.52, accuracy: 0.0001)
+        XCTAssertTrue(project.manualZoomSegments.allSatisfy { $0.easeInDuration == 0.08 })
+        XCTAssertTrue(project.manualZoomSegments.allSatisfy { $0.easeOutDuration == 0 })
+        XCTAssertLessThanOrEqual(project.manualZoomSegments[0].end, project.manualZoomSegments[1].start + 0.0001)
+        XCTAssertLessThanOrEqual(project.manualZoomSegments[1].end, project.manualZoomSegments[2].start + 0.0001)
     }
 
     func testEditedZoomTrackCanStayEmpty() {
@@ -329,6 +484,7 @@ final class ProjectStoreTests: XCTestCase {
             id: UUID(),
             configuration: .init(target: .screen, includeMicrophone: false, includeSystemAudio: false),
             startedAt: Date(),
+            mediaStartedAt: nil,
             endedAt: Date().addingTimeInterval(5),
             rawCaptureURL: rawCaptureURL,
             coordinateSpace: nil

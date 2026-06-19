@@ -164,7 +164,8 @@ final class HomeViewModel: ObservableObject {
         do {
             let session = try await environment.screenRecorder.stop()
             let events = environment.eventMonitor.stop()
-            let normalizedEvents = normalize(events: events, for: session)
+            let timeAlignedEvents = alignEventTimeline(events, with: session)
+            let normalizedEvents = normalize(events: timeAlignedEvents, for: session)
             let keyframes = environment.cameraPlanEngine.makePlan(
                 from: normalizedEvents,
                 baseZoom: 1.0,
@@ -184,6 +185,7 @@ final class HomeViewModel: ObservableObject {
 
             let project = try environment.projectStore.createProject(
                 from: session,
+                rawEvents: events,
                 events: normalizedEvents,
                 keyframes: keyframes,
                 style: style
@@ -201,6 +203,27 @@ final class HomeViewModel: ObservableObject {
             recordingState = .idle
             environment.windowController.restoreAfterCapture()
             statusMessage = "Unable to finish recording: \(error.localizedDescription)"
+        }
+    }
+
+    private func alignEventTimeline(_ events: [PointerEvent], with session: CaptureSession) -> [PointerEvent] {
+        guard let mediaStartedAt = session.mediaStartedAt else {
+            return events
+        }
+
+        let offset = mediaStartedAt.timeIntervalSince(session.startedAt)
+        guard offset > 0.0001 else {
+            return events
+        }
+
+        return events.map { event in
+            PointerEvent(
+                id: event.id,
+                timestamp: max(0, event.timestamp - offset),
+                location: event.location,
+                globalLocation: event.globalLocation,
+                type: event.type
+            )
         }
     }
 
@@ -355,7 +378,7 @@ final class HomeViewModel: ObservableObject {
                 preferredWindowID: selectedCaptureTarget == .window ? selectedWindowTargetID : nil
             )
             let session = try await environment.screenRecorder.start(configuration: configuration)
-            environment.eventMonitor.start()
+            environment.eventMonitor.start(origin: session.startedAt)
             recordingState = .recording(RecordingSessionState(startedAt: session.startedAt))
             statusMessage = "Recording started. Use the floating toolbar to pause or finish."
         } catch {
@@ -431,24 +454,30 @@ final class HomeViewModel: ObservableObject {
 
         switch target {
         case .screen:
-            let normalizedEvents = normalizedPointerEvents(events, screenBounds: screenBounds, viewport: viewport)
-            return normalizedEvents.isEmpty ? events : normalizedEvents
+            return normalizedPointerEvents(events, screenBounds: screenBounds, viewport: viewport)
         case .window:
-            return normalizedWindowPointerEvents(events, screenBounds: screenBounds, viewport: viewport)
+            return normalizedPointerEvents(events, screenBounds: screenBounds, viewport: viewport, outsideTolerance: 10)
         }
     }
 
     private static func normalizedPointerEvents(
         _ events: [PointerEvent],
         screenBounds: CGRect,
-        viewport: CGRect
+        viewport: CGRect,
+        outsideTolerance: CGFloat = 0
     ) -> [PointerEvent] {
-        events.compactMap { event -> PointerEvent? in
-            let globalX = screenBounds.minX + (event.location.x * screenBounds.width)
-            let globalY = screenBounds.minY + ((1 - event.location.y) * screenBounds.height)
-            let globalPoint = CGPoint(x: globalX, y: globalY)
+        let acceptedViewport = viewport.insetBy(dx: -outsideTolerance, dy: -outsideTolerance)
+        return events.compactMap { event -> PointerEvent? in
+            let globalPoint: CGPoint
+            if let storedGlobalPoint = event.globalLocation?.cgPoint {
+                globalPoint = storedGlobalPoint
+            } else {
+                let globalX = screenBounds.minX + (event.location.x * screenBounds.width)
+                let globalY = screenBounds.minY + ((1 - event.location.y) * screenBounds.height)
+                globalPoint = CGPoint(x: globalX, y: globalY)
+            }
 
-            guard viewport.contains(globalPoint) else { return nil }
+            guard acceptedViewport.contains(globalPoint) else { return nil }
 
             let localX = ((globalPoint.x - viewport.minX) / viewport.width).clamped(to: 0...1)
             let localY = (1 - ((globalPoint.y - viewport.minY) / viewport.height)).clamped(to: 0...1)
@@ -457,51 +486,10 @@ final class HomeViewModel: ObservableObject {
                 id: event.id,
                 timestamp: event.timestamp,
                 location: NormalizedPoint(x: localX, y: localY),
+                globalLocation: event.globalLocation,
                 type: event.type
             )
         }
     }
 
-    private static func normalizedWindowPointerEvents(
-        _ events: [PointerEvent],
-        screenBounds: CGRect,
-        viewport: CGRect
-    ) -> [PointerEvent] {
-        let alternateViewport = flippedViewport(viewport, in: screenBounds)
-        let candidates = [viewport, alternateViewport]
-        let scoredCandidates = candidates.map { candidate in
-            (
-                viewport: candidate,
-                events: normalizedPointerEvents(events, screenBounds: screenBounds, viewport: candidate)
-            )
-        }
-
-        let best = scoredCandidates.max { lhs, rhs in
-            if lhs.events.count != rhs.events.count {
-                return lhs.events.count < rhs.events.count
-            }
-            return averageDistanceFromCenter(lhs.events) > averageDistanceFromCenter(rhs.events)
-        }
-
-        return best?.events ?? []
-    }
-
-    private static func flippedViewport(_ viewport: CGRect, in screenBounds: CGRect) -> CGRect {
-        CGRect(
-            x: viewport.minX,
-            y: screenBounds.minY + screenBounds.height - (viewport.minY - screenBounds.minY) - viewport.height,
-            width: viewport.width,
-            height: viewport.height
-        )
-    }
-
-    private static func averageDistanceFromCenter(_ events: [PointerEvent]) -> Double {
-        guard !events.isEmpty else { return .greatestFiniteMagnitude }
-        let total = events.reduce(0.0) { partialResult, event in
-            let dx = event.location.x - 0.5
-            let dy = event.location.y - 0.5
-            return partialResult + sqrt((dx * dx) + (dy * dy))
-        }
-        return total / Double(events.count)
-    }
 }

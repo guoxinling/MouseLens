@@ -282,21 +282,36 @@ struct FrameComposer {
     func snapshot(
         at timestamp: TimeInterval,
         from keyframes: [CameraKeyframe],
-        manualZoomSegments: [ManualZoomSegment]
+        manualZoomSegments: [ManualZoomSegment],
+        zoomTrackEdited: Bool = false
     ) -> FrameSnapshot {
-        let baseSnapshot = snapshot(at: timestamp, from: keyframes)
-        guard let segment = activeManualZoomSegment(at: timestamp, in: manualZoomSegments) else {
+        let cameraSnapshot = snapshot(at: timestamp, from: keyframes)
+        let zoomTrackIsAuthoritative = zoomTrackEdited || manualZoomSegments.isEmpty == false
+        let baseSnapshot = zoomTrackIsAuthoritative
+            ? FrameSnapshot(focus: .center, zoom: 1.0, emphasis: cameraSnapshot.emphasis)
+            : cameraSnapshot
+
+        guard let segment = activeZoomSegment(at: timestamp, in: manualZoomSegments) else {
             return baseSnapshot
         }
 
+        if segment.source == .auto {
+            return cameraSnapshot
+        }
+
+        let transitionBase = transitionBaseSnapshot(
+            before: segment,
+            in: manualZoomSegments,
+            fallback: baseSnapshot
+        )
         let blend = manualZoomBlend(at: timestamp, in: segment)
-        guard blend > 0 else { return baseSnapshot }
+        guard blend > 0 else { return transitionBase }
 
         let focus = NormalizedPoint(
-            x: baseSnapshot.focus.x + ((segment.focus.x - baseSnapshot.focus.x) * blend),
-            y: baseSnapshot.focus.y + ((segment.focus.y - baseSnapshot.focus.y) * blend)
+            x: transitionBase.focus.x + ((segment.focus.x - transitionBase.focus.x) * blend),
+            y: transitionBase.focus.y + ((segment.focus.y - transitionBase.focus.y) * blend)
         )
-        let zoom = baseSnapshot.zoom + ((segment.zoomLevel - baseSnapshot.zoom) * blend)
+        let zoom = transitionBase.zoom + ((segment.zoomLevel - transitionBase.zoom) * blend)
         return FrameSnapshot(
             focus: focus,
             zoom: zoom.clamped(to: ManualZoomSegment.zoomRange),
@@ -304,20 +319,54 @@ struct FrameComposer {
         )
     }
 
-    private func activeManualZoomSegment(
+    private func activeZoomSegment(
         at timestamp: TimeInterval,
         in segments: [ManualZoomSegment]
     ) -> ManualZoomSegment? {
         segments
-            .filter { $0.source == .manual }
             .filter { timestamp >= $0.start && timestamp <= $0.end }
             .sorted { lhs, rhs in
                 if lhs.source != rhs.source {
-                    return lhs.source == .auto
+                    return lhs.source == .auto && rhs.source == .manual
                 }
                 return lhs.start < rhs.start
             }
             .last
+    }
+
+    private func transitionBaseSnapshot(
+        before segment: ManualZoomSegment,
+        in segments: [ManualZoomSegment],
+        fallback: FrameSnapshot
+    ) -> FrameSnapshot {
+        guard segment.easeInDuration > 0 else { return fallback }
+        let transitionWindow = max(segment.easeInDuration, 0.12)
+        guard let previous = segments
+            .filter({ candidate in
+                candidate.id != segment.id
+                    && candidate.source == .manual
+                    && candidate.end <= segment.start + 0.0001
+                    && segment.start - candidate.end <= transitionWindow + 0.0001
+            })
+            .sorted(by: { lhs, rhs in
+                if abs(lhs.end - rhs.end) > 0.0001 {
+                    return lhs.end < rhs.end
+                }
+                if lhs.source != rhs.source {
+                    return lhs.source == .auto && rhs.source == .manual
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            })
+            .last
+        else {
+            return fallback
+        }
+
+        return FrameSnapshot(
+            focus: previous.focus,
+            zoom: previous.zoomLevel,
+            emphasis: fallback.emphasis
+        )
     }
 
     private func manualZoomBlend(at timestamp: TimeInterval, in segment: ManualZoomSegment) -> Double {
@@ -339,6 +388,53 @@ struct FrameComposer {
 }
 
 struct SourceCropPlanner {
+    struct Presentation: Equatable {
+        let cropRect: CGRect
+        let displayRect: CGRect
+    }
+
+    func presentation(
+        for sourceExtent: CGRect,
+        contentRect: CGRect,
+        snapshot: FrameSnapshot,
+        preservesFullSourceAtBase: Bool
+    ) -> Presentation {
+        let outputAspectRatio = contentRect.width / max(contentRect.height, 1)
+        if preservesFullSourceAtBase, snapshot.zoom <= 1.0001 {
+            return Presentation(
+                cropRect: sourceExtent,
+                displayRect: aspectFitRect(for: sourceExtent.size, in: contentRect)
+            )
+        }
+
+        if preservesFullSourceAtBase {
+            let sourceAspectRatio = sourceExtent.width / max(sourceExtent.height, 1)
+            let fullViewDisplayRect = aspectFitRect(for: sourceExtent.size, in: contentRect)
+            let focusPresentation = Presentation(
+                cropRect: cropRect(
+                    for: sourceExtent,
+                    outputAspectRatio: sourceAspectRatio,
+                    snapshot: snapshot
+                ),
+                displayRect: fullViewDisplayRect
+            )
+            let progress = smootherstep(((snapshot.zoom - 1.0) / 0.34).clamped(to: 0...1))
+            return Presentation(
+                cropRect: interpolatedRect(from: sourceExtent, to: focusPresentation.cropRect, progress: progress),
+                displayRect: interpolatedRect(from: fullViewDisplayRect, to: focusPresentation.displayRect, progress: progress)
+            )
+        }
+
+        return Presentation(
+            cropRect: cropRect(
+                for: sourceExtent,
+                outputAspectRatio: outputAspectRatio,
+                snapshot: snapshot
+            ),
+            displayRect: contentRect
+        )
+    }
+
     func cropRect(
         for sourceExtent: CGRect,
         outputAspectRatio: CGFloat,
@@ -348,22 +444,18 @@ struct SourceCropPlanner {
 
         let baseCrop = baseCropRect(for: sourceExtent, outputAspectRatio: outputAspectRatio)
         let zoom = snapshot.zoom.clamped(to: ManualZoomSegment.zoomRange)
+        guard zoom > 1.0001 else {
+            return baseCrop
+        }
+
         let cropWidth = baseCrop.width / zoom
         let cropHeight = baseCrop.height / zoom
 
-        // CameraPlanEngine already clamps focus away from unstable screen edges.
-        // Using the full source extent here keeps click emphasis aligned with the
-        // actual pointer location instead of introducing an extra vertical offset.
         let centerX = sourceExtent.minX + (snapshot.focus.x * sourceExtent.width)
         let centerY = sourceExtent.maxY - (snapshot.focus.y * sourceExtent.height)
 
-        let minX = sourceExtent.minX
-        let maxX = sourceExtent.maxX - cropWidth
-        let minY = sourceExtent.minY
-        let maxY = sourceExtent.maxY - cropHeight
-
-        let originX = (centerX - (cropWidth / 2)).clamped(to: minX...max(maxX, minX))
-        let originY = (centerY - (cropHeight / 2)).clamped(to: minY...max(maxY, minY))
+        let originX = centerX - (cropWidth / 2)
+        let originY = centerY - (cropHeight / 2)
 
         return CGRect(x: originX, y: originY, width: cropWidth, height: cropHeight)
     }
@@ -382,24 +474,54 @@ struct SourceCropPlanner {
         }
     }
 
+    func aspectFitRect(for sourceSize: CGSize, in contentRect: CGRect) -> CGRect {
+        let safeSourceWidth = max(sourceSize.width, 1)
+        let safeSourceHeight = max(sourceSize.height, 1)
+        let scale = min(contentRect.width / safeSourceWidth, contentRect.height / safeSourceHeight)
+        let width = safeSourceWidth * scale
+        let height = safeSourceHeight * scale
+        return CGRect(
+            x: contentRect.midX - (width / 2),
+            y: contentRect.midY - (height / 2),
+            width: width,
+            height: height
+        )
+    }
+
     func mappedContentPoint(
         for focus: NormalizedPoint,
         in sourceExtent: CGRect,
         cropRect: CGRect,
-        layout: RenderLayout
+        layout: RenderLayout,
+        displayRect: CGRect? = nil
     ) -> CGPoint {
-        let sourcePoint = CGPoint(
-            x: sourceExtent.minX + (focus.x * sourceExtent.width),
-            y: sourceExtent.maxY - (focus.y * sourceExtent.height)
-        )
+        let displayRect = displayRect ?? layout.contentRect
+        let sourceX = sourceExtent.minX + (focus.x * sourceExtent.width)
+        let sourceTopY = focus.y * sourceExtent.height
+        let cropTop = sourceExtent.height - cropRect.maxY
 
-        let relativeX = ((sourcePoint.x - cropRect.minX) / max(cropRect.width, 1)).clamped(to: 0...1)
-        let relativeY = ((sourcePoint.y - cropRect.minY) / max(cropRect.height, 1)).clamped(to: 0...1)
+        let relativeX = ((sourceX - cropRect.minX) / max(cropRect.width, 1)).clamped(to: 0...1)
+        let relativeY = ((sourceTopY - cropTop) / max(cropRect.height, 1)).clamped(to: 0...1)
 
         return CGPoint(
-            x: layout.contentRect.minX + (CGFloat(relativeX) * layout.contentRect.width),
-            y: layout.contentRect.minY + (CGFloat(relativeY) * layout.contentRect.height)
+            x: displayRect.minX + (CGFloat(relativeX) * displayRect.width),
+            y: displayRect.minY + (CGFloat(relativeY) * displayRect.height)
         )
+    }
+
+    private func interpolatedRect(from source: CGRect, to target: CGRect, progress: Double) -> CGRect {
+        let progress = CGFloat(progress.clamped(to: 0...1))
+        return CGRect(
+            x: source.minX + ((target.minX - source.minX) * progress),
+            y: source.minY + ((target.minY - source.minY) * progress),
+            width: source.width + ((target.width - source.width) * progress),
+            height: source.height + ((target.height - source.height) * progress)
+        )
+    }
+
+    private func smootherstep(_ value: Double) -> Double {
+        let t = value.clamped(to: 0...1)
+        return t * t * t * (t * ((t * 6) - 15) + 10)
     }
 }
 
@@ -500,7 +622,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let snapshot = composer.snapshot(
             at: clampedTimestamp,
             from: project.cameraKeyframes,
-            manualZoomSegments: project.manualZoomSegments
+            manualZoomSegments: project.manualZoomSegments,
+            zoomTrackEdited: project.zoomTrackEdited
         )
         let pointerSnapshot = pointerTimeline.snapshot(at: clampedTimestamp, from: project.events, smoothing: .raw)
 
@@ -597,7 +720,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 let snapshot = composer.snapshot(
                     at: timestamp,
                     from: project.cameraKeyframes,
-                    manualZoomSegments: project.manualZoomSegments
+                    manualZoomSegments: project.manualZoomSegments,
+                    zoomTrackEdited: project.zoomTrackEdited
                 )
                 let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
 
@@ -757,7 +881,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 let snapshot = composer.snapshot(
                     at: seconds,
                     from: project.cameraKeyframes,
-                    manualZoomSegments: project.manualZoomSegments
+                    manualZoomSegments: project.manualZoomSegments,
+                    zoomTrackEdited: project.zoomTrackEdited
                 )
                 let pointerSnapshot = pointerTimeline.snapshot(at: seconds, from: project.events, smoothing: .raw)
                 let composedFrame = composeFrame(
@@ -1025,25 +1150,28 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         project: RecordingProject,
         preparedAssets: PreparedRenderAssets
     ) -> CIImage {
-        let cropRect = cropPlanner.cropRect(
+        let presentation = cropPlanner.presentation(
             for: sourceImage.extent,
-            outputAspectRatio: preparedAssets.layout.outputAspectRatio,
-            snapshot: snapshot
+            contentRect: preparedAssets.layout.contentRect,
+            snapshot: snapshot,
+            preservesFullSourceAtBase: true
         )
+        let cropRect = presentation.cropRect
+        let displayRect = presentation.displayRect
 
         let translated = sourceImage
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY))
 
-        let scaleX = preparedAssets.layout.contentRect.width / cropRect.width
-        let scaleY = preparedAssets.layout.contentRect.height / cropRect.height
+        let scaleX = displayRect.width / cropRect.width
+        let scaleY = displayRect.height / cropRect.height
 
         let positioned = translated
             .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
             .transformed(
                 by: CGAffineTransform(
-                    translationX: preparedAssets.layout.contentRect.minX,
-                    y: preparedAssets.layout.contentRect.minY
+                    translationX: displayRect.minX,
+                    y: displayRect.minY
                 )
             )
 
@@ -1062,7 +1190,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             reconstructsCursor: project.reconstructsCursor,
             layout: preparedAssets.layout,
             sourceExtent: sourceImage.extent,
-            cropRect: cropRect
+            cropRect: cropRect,
+            displayRect: displayRect
         )
 
         let withCursor = applyCursorOverlay(
@@ -1071,7 +1200,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             reconstructsCursor: project.reconstructsCursor,
             layout: preparedAssets.layout,
             sourceExtent: sourceImage.extent,
-            cropRect: cropRect
+            cropRect: cropRect,
+            displayRect: displayRect
         )
 
         return withCursor.composited(over: preparedAssets.backgroundImage)
@@ -1213,7 +1343,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         reconstructsCursor: Bool,
         layout: RenderLayout,
         sourceExtent: CGRect,
-        cropRect: CGRect
+        cropRect: CGRect,
+        displayRect: CGRect
     ) -> CIImage {
         guard reconstructsCursor == false else {
             return image
@@ -1227,7 +1358,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             for: snapshot.focus,
             in: sourceExtent,
             cropRect: cropRect,
-            layout: layout
+            layout: layout,
+            displayRect: displayRect
         )
         return applyClickRipple(to: image, point: point, intensity: 1.0, layout: layout)
     }
@@ -1277,7 +1409,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         reconstructsCursor: Bool,
         layout: RenderLayout,
         sourceExtent: CGRect,
-        cropRect: CGRect
+        cropRect: CGRect,
+        displayRect: CGRect
     ) -> CIImage {
         guard reconstructsCursor, let pointerSnapshot else { return image }
 
@@ -1285,7 +1418,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             for: pointerSnapshot.location,
             in: sourceExtent,
             cropRect: cropRect,
-            layout: layout
+            layout: layout,
+            displayRect: displayRect
         )
 
         var layeredImage = image
@@ -1294,7 +1428,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 for: clickLocation,
                 in: sourceExtent,
                 cropRect: cropRect,
-                layout: layout
+                layout: layout,
+                displayRect: displayRect
             )
             let intensity = (0.45 + (pointerSnapshot.clickProgress * 0.55)).clamped(to: 0.45...1.0)
             layeredImage = applyClickRipple(to: layeredImage, point: clickPoint, intensity: intensity, layout: layout)

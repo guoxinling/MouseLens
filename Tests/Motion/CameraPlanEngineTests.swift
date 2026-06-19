@@ -17,14 +17,44 @@ final class CameraPlanEngineTests: XCTestCase {
             clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
         )
 
-        let openingFrames = plan.filter { $0.timestamp < 1.0 }
+        let openingFrames = plan.filter { $0.timestamp < 0.40 }
         XCTAssertFalse(openingFrames.isEmpty)
         XCTAssertTrue(openingFrames.allSatisfy { abs($0.zoom - 1.0) < 0.0001 })
         XCTAssertTrue(openingFrames.allSatisfy { abs($0.focus.x - 0.5) < 0.0001 && abs($0.focus.y - 0.5) < 0.0001 })
 
+        let anticipated = snapshot(in: plan, nearestTo: 0.50)
+        XCTAssertGreaterThan(anticipated.focus.x, 0.5)
+        XCTAssertEqual(anticipated.zoom, 1.0, accuracy: 0.0001)
+
+        let clickTime = snapshot(in: plan, nearestTo: 1.00)
+        XCTAssertEqual(clickTime.focus.x, 0.82, accuracy: 0.025)
+        XCTAssertEqual(clickTime.focus.y, 0.46, accuracy: 0.025)
+
         let afterClick = snapshot(in: plan, nearestTo: 1.35)
         XCTAssertGreaterThan(afterClick.zoom, 1.03)
         XCTAssertGreaterThan(afterClick.focus.x, 0.5)
+
+        let sampleInterval = (plan[1].timestamp - plan[0].timestamp)
+        XCTAssertEqual(sampleInterval, 1.0 / 60.0, accuracy: 0.0001)
+    }
+
+    func testCameraFocusUsesActualClickPointNearEdges() {
+        let engine = CameraPlanEngine()
+        let clickPoint = NormalizedPoint(x: 0.03, y: 0.94)
+        let events = [
+            PointerEvent(timestamp: 0.2, location: clickPoint, type: .click)
+        ]
+
+        let plan = engine.makePlan(
+            from: events,
+            baseZoom: 1.0,
+            followStrength: 0.72,
+            clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
+        )
+
+        let settled = snapshot(in: plan, nearestTo: 0.85)
+        XCTAssertEqual(settled.focus.x, clickPoint.x, accuracy: 0.0001)
+        XCTAssertEqual(settled.focus.y, clickPoint.y, accuracy: 0.0001)
     }
 
     func testCameraPlanWithoutClicksStaysFullView() {
@@ -71,6 +101,28 @@ final class CameraPlanEngineTests: XCTestCase {
         XCTAssertLessThan(abs(thirdClick.zoom - secondClick.zoom), 0.025)
         XCTAssertLessThan(abs(thirdClick.focus.x - firstClick.focus.x), 0.08)
         XCTAssertLessThan(abs(thirdClick.focus.y - firstClick.focus.y), 0.08)
+    }
+
+    func testModerateDistanceClickReanchorsCameraFocus() {
+        let engine = CameraPlanEngine()
+        let firstClick = NormalizedPoint(x: 0.24, y: 0.67)
+        let secondClick = NormalizedPoint(x: 0.27, y: 0.79)
+        let events = [
+            PointerEvent(timestamp: 0.05, location: firstClick, type: .click),
+            PointerEvent(timestamp: 0.80, location: secondClick, type: .click)
+        ]
+
+        let plan = engine.makePlan(
+            from: events,
+            baseZoom: 1.0,
+            followStrength: 0.72,
+            clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
+        )
+
+        let settled = snapshot(in: plan, nearestTo: 1.45)
+
+        XCTAssertEqual(settled.focus.x, secondClick.x, accuracy: 0.015)
+        XCTAssertEqual(settled.focus.y, secondClick.y, accuracy: 0.015)
     }
 
     func testFarClickStartsNewShotWithGentleCameraTravel() {
@@ -157,11 +209,9 @@ final class CameraPlanEngineTests: XCTestCase {
             clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
         )
 
-        let afterReversalClick = snapshot(in: plan, nearestTo: 0.74)
         let held = snapshot(in: plan, nearestTo: 1.05)
 
-        XCTAssertGreaterThan(held.focus.x, afterReversalClick.focus.x)
-        XCTAssertGreaterThan(held.focus.x, 0.45)
+        XCTAssertGreaterThan(held.focus.x, 0.75)
     }
 
     func testSustainedMovementWithoutClickDoesNotCreateZoomShot() {
@@ -189,12 +239,12 @@ final class CameraPlanEngineTests: XCTestCase {
         XCTAssertEqual(afterDwell.zoom, 1.0, accuracy: 0.0001)
     }
 
-    func testShotTransitionUsesEasedCurveAndSettlesWithoutOvershoot() {
+    func testShotTransitionAnticipatesClickAndSettlesWithoutOvershoot() {
         let engine = CameraPlanEngine()
         let events = [
             PointerEvent(timestamp: 0.0, location: .init(x: 0.24, y: 0.28), type: .move),
-            PointerEvent(timestamp: 0.55, location: .init(x: 0.82, y: 0.46), type: .click),
-            PointerEvent(timestamp: 1.10, location: .init(x: 0.82, y: 0.46), type: .move)
+            PointerEvent(timestamp: 1.00, location: .init(x: 0.82, y: 0.46), type: .click),
+            PointerEvent(timestamp: 1.45, location: .init(x: 0.82, y: 0.46), type: .move)
         ]
 
         let plan = engine.makePlan(
@@ -204,26 +254,24 @@ final class CameraPlanEngineTests: XCTestCase {
             clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
         )
 
-        let beforeTransition = snapshot(in: plan, nearestTo: 0.52)
-        let earlyTransition = snapshot(in: plan, nearestTo: 0.61)
-        let middleTransition = snapshot(in: plan, nearestTo: 0.71)
-        let settled = snapshot(in: plan, nearestTo: 0.94)
-
-        let totalTravel = max(settled.focus.x - beforeTransition.focus.x, 0.0001)
-        let earlyProgress = (earlyTransition.focus.x - beforeTransition.focus.x) / totalTravel
-        let earlyStep = earlyTransition.focus.x - beforeTransition.focus.x
-        let middleStep = middleTransition.focus.x - earlyTransition.focus.x
+        let beforeAnticipation = snapshot(in: plan, nearestTo: 0.38)
+        let anticipated = snapshot(in: plan, nearestTo: 0.52)
+        let clickTime = snapshot(in: plan, nearestTo: 1.00)
+        let settled = snapshot(in: plan, nearestTo: 1.32)
         let maximumTransitionX = plan
-            .filter { $0.timestamp >= 0.55 && $0.timestamp <= 1.00 }
+            .filter { $0.timestamp >= 0.42 && $0.timestamp <= 1.20 }
             .map(\.focus.x)
             .max() ?? 0
 
-        XCTAssertLessThan(earlyProgress, 0.22)
-        XCTAssertGreaterThan(middleStep, earlyStep)
+        XCTAssertEqual(beforeAnticipation.focus.x, 0.5, accuracy: 0.0001)
+        XCTAssertGreaterThan(anticipated.focus.x, beforeAnticipation.focus.x)
+        XCTAssertEqual(clickTime.focus.x, 0.82, accuracy: 0.025)
+        XCTAssertEqual(clickTime.focus.y, 0.46, accuracy: 0.025)
+        XCTAssertGreaterThan(settled.zoom, clickTime.zoom)
         XCTAssertLessThanOrEqual(maximumTransitionX, 0.83)
     }
 
-    func testWithinShotPointerMovementStillCreatesGentleMotion() {
+    func testWithinShotPointerMovementDoesNotDragCameraAwayFromClickAnchor() {
         let engine = CameraPlanEngine()
         let events = [
             PointerEvent(timestamp: 0.05, location: .init(x: 0.44, y: 0.45), type: .click),
@@ -240,15 +288,14 @@ final class CameraPlanEngineTests: XCTestCase {
             clickRule: ClickEmphasisRule(boost: 0.54, duration: 0.72)
         )
 
-        let early = snapshot(in: plan, nearestTo: 0.10)
         let later = snapshot(in: plan, nearestTo: 0.80)
 
-        XCTAssertGreaterThan(later.focus.x, 0.442)
-        XCTAssertLessThan(later.focus.x, 0.48)
+        XCTAssertEqual(later.focus.x, 0.44, accuracy: 0.0001)
+        XCTAssertEqual(later.focus.y, 0.45, accuracy: 0.0001)
         XCTAssertGreaterThan(later.zoom, 1.0)
     }
 
-    func testIdleReturnRecentersWithinShotLeadDeliberately() {
+    func testIdleReturnRecentersShotAfterClickInactivity() {
         let engine = CameraPlanEngine()
         let events = [
             PointerEvent(timestamp: 0.05, location: .init(x: 0.44, y: 0.45), type: .click),
@@ -266,15 +313,16 @@ final class CameraPlanEngineTests: XCTestCase {
         )
 
         let anchor = NormalizedPoint(x: 0.44, y: 0.45)
-        let activeLead = snapshot(in: plan, nearestTo: 0.85)
-        let returned = snapshot(in: plan, nearestTo: 2.45)
-        let activeTravel = abs(activeLead.focus.x - anchor.x)
-        let returnedTravel = abs(returned.focus.x - anchor.x)
+        let activeShot = snapshot(in: plan, nearestTo: 0.85)
+        let returned = snapshot(in: plan, nearestTo: 3.20)
 
-        XCTAssertGreaterThan(activeTravel, 0.003)
-        XCTAssertLessThan(returnedTravel, activeTravel * 0.5)
-        XCTAssertLessThan(returned.zoom, activeLead.zoom)
-        XCTAssertGreaterThan(returned.zoom, 1.0)
+        XCTAssertEqual(activeShot.focus.x, anchor.x, accuracy: 0.0001)
+        XCTAssertEqual(activeShot.focus.y, anchor.y, accuracy: 0.0001)
+        XCTAssertGreaterThan(activeShot.zoom, 1.0)
+        XCTAssertLessThan(abs(returned.focus.x - 0.5), abs(activeShot.focus.x - 0.5))
+        XCTAssertLessThan(abs(returned.focus.y - 0.5), abs(activeShot.focus.y - 0.5))
+        XCTAssertLessThan(returned.zoom, activeShot.zoom)
+        XCTAssertEqual(returned.zoom, 1.0, accuracy: 0.0001)
     }
 
     private func snapshot(in plan: [CameraKeyframe], nearestTo timestamp: TimeInterval) -> CameraKeyframe {

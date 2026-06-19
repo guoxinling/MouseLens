@@ -12,6 +12,25 @@ struct NormalizedPoint: Codable, Hashable, Sendable {
     }
 }
 
+struct PointerGlobalLocation: Codable, Equatable {
+    let x: Double
+    let y: Double
+
+    init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+
+    init(_ point: CGPoint) {
+        self.x = point.x
+        self.y = point.y
+    }
+
+    var cgPoint: CGPoint {
+        CGPoint(x: x, y: y)
+    }
+}
+
 enum PointerEventType: String, Codable {
     case move
     case click
@@ -22,12 +41,20 @@ struct PointerEvent: Identifiable, Codable, Equatable {
     let id: UUID
     let timestamp: TimeInterval
     let location: NormalizedPoint
+    let globalLocation: PointerGlobalLocation?
     let type: PointerEventType
 
-    init(id: UUID = UUID(), timestamp: TimeInterval, location: NormalizedPoint, type: PointerEventType) {
+    init(
+        id: UUID = UUID(),
+        timestamp: TimeInterval,
+        location: NormalizedPoint,
+        globalLocation: PointerGlobalLocation? = nil,
+        type: PointerEventType
+    ) {
         self.id = id
         self.timestamp = timestamp
         self.location = location
+        self.globalLocation = globalLocation
         self.type = type
     }
 }
@@ -39,9 +66,9 @@ final class PointerEventStore {
     private var events: [PointerEvent] = []
     private let lock = NSLock()
 
-    func reset() {
+    func reset(origin: Date = Date()) {
         lock.lock()
-        origin = Date()
+        self.origin = origin
         pausedAt = nil
         accumulatedPausedDuration = 0
         events = []
@@ -69,7 +96,7 @@ final class PointerEventStore {
         self.pausedAt = nil
     }
 
-    func append(location: NormalizedPoint, type: PointerEventType) {
+    func append(location: NormalizedPoint, globalLocation: CGPoint? = nil, type: PointerEventType) {
         lock.lock()
         defer { lock.unlock() }
         if origin == nil {
@@ -79,7 +106,14 @@ final class PointerEventStore {
 
         let base = origin ?? Date()
         let timestamp = max(0, Date().timeIntervalSince(base) - accumulatedPausedDuration)
-        events.append(PointerEvent(timestamp: timestamp, location: location, type: type))
+        events.append(
+            PointerEvent(
+                timestamp: timestamp,
+                location: location,
+                globalLocation: globalLocation.map(PointerGlobalLocation.init),
+                type: type
+            )
+        )
     }
 
     func snapshot() -> [PointerEvent] {
@@ -98,9 +132,9 @@ final class EventTapMonitor {
         self.store = store
     }
 
-    func start() {
+    func start(origin: Date = Date()) {
         _ = stop()
-        store.reset()
+        store.reset(origin: origin)
 
         let masks: [(NSEvent.EventTypeMask, PointerEventType)] = [
             (.mouseMoved, .move),
@@ -113,7 +147,7 @@ final class EventTapMonitor {
 
         for (mask, type) in masks {
             if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
-                self?.record(event: event, as: type)
+                self?.recordNSEvent(event, as: type)
             }) {
                 monitors.append(monitor)
             }
@@ -136,10 +170,18 @@ final class EventTapMonitor {
         store.resume()
     }
 
-    private func record(event: NSEvent, as type: PointerEventType) {
+    private func recordNSEvent(_ event: NSEvent, as type: PointerEventType) {
+        record(globalPoint: NSEvent.mouseLocation, as: type)
+    }
+
+    private func record(globalPoint: CGPoint, as type: PointerEventType) {
         let bounds = Self.activeScreenBounds()
-        guard let normalized = Self.normalizedLocation(for: NSEvent.mouseLocation, in: bounds) else { return }
-        store.append(location: normalized, type: type)
+        record(globalPoint: globalPoint, as: type, in: bounds)
+    }
+
+    private func record(globalPoint: CGPoint, as type: PointerEventType, in bounds: CGRect) {
+        guard let normalized = Self.normalizedLocation(for: globalPoint, in: bounds) else { return }
+        store.append(location: normalized, globalLocation: globalPoint, type: type)
     }
 
     static func activeScreenBounds() -> CGRect {

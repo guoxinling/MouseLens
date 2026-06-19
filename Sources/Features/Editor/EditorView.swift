@@ -331,23 +331,21 @@ struct EditorView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            viewModel.stopManualZoomAreaAdjustment()
+                            viewModel.deleteSelectedManualZoomSegment()
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!viewModel.canDeleteSelectedManualZoomSegment)
                     }
                     .font(.system(size: 12, weight: .medium))
                 }
-
-                HStack {
-                    Spacer()
-                    Button {
-                        viewModel.stopManualZoomAreaAdjustment()
-                        viewModel.deleteSelectedManualZoomSegment()
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(!viewModel.canDeleteSelectedManualZoomSegment)
-                }
-                .font(.system(size: 12, weight: .medium))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
@@ -442,18 +440,18 @@ struct EditorView: View {
 
             HStack(spacing: 12) {
                 Button {
-                    viewModel.splitClipAtPlayhead()
+                    viewModel.splitTimelineSelectionAtPlayhead()
                 } label: {
-                    Label("Split", systemImage: "square.split.2x1")
+                    Label("Split \(viewModel.timelineSelectionLabel)", systemImage: "square.split.2x1")
                 }
-                .disabled(!viewModel.canSplitClip)
+                .disabled(!viewModel.canSplitTimelineSelection)
 
                 Button {
-                    viewModel.deleteSelectedClip()
+                    viewModel.deleteTimelineSelection()
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete \(viewModel.timelineSelectionLabel)", systemImage: "trash")
                 }
-                .disabled(!viewModel.canDeleteSelectedClip)
+                .disabled(!viewModel.canDeleteTimelineSelection)
 
                 Button {
                     viewModel.resetClips()

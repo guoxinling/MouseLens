@@ -55,11 +55,14 @@ struct HomeView: View {
         HStack(spacing: isCompact ? 10 : 14) {
             toolbarIdentity(isCompact: isCompact)
                 .frame(width: isCompact ? 176 : 190, alignment: .leading)
+                .layoutPriority(0)
 
             captureTargetControl(isCompact: isCompact)
+                .layoutPriority(2)
 
             if viewModel.selectedCaptureTarget == .window {
                 windowTargetControl(isCompact: isCompact)
+                    .layoutPriority(0)
             }
 
             ToolbarToggleButton(
@@ -81,6 +84,7 @@ struct HomeView: View {
             .disabled(viewModel.recordingState != .idle)
 
             aspectRatioControl(isCompact: isCompact)
+                .layoutPriority(2)
 
             Spacer(minLength: isCompact ? 8 : 14)
 
@@ -117,6 +121,7 @@ struct HomeView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(viewModel.permissions.needsScreenRecordingRelaunch)
+            .layoutPriority(10)
         }
         .frame(maxWidth: .infinity)
     }
@@ -209,7 +214,14 @@ struct HomeView: View {
             }
             .foregroundStyle(.white.opacity(0.88))
             .padding(.horizontal, 10)
-            .frame(width: isCompact ? 152 : 188, height: 40)
+            .frame(
+                minWidth: isCompact ? 104 : 126,
+                idealWidth: isCompact ? 136 : 164,
+                maxWidth: isCompact ? 150 : 178,
+                minHeight: 40,
+                idealHeight: 40,
+                maxHeight: 40
+            )
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.white.opacity(0.075))
@@ -220,7 +232,6 @@ struct HomeView: View {
             )
         }
         .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: true, vertical: false)
         .disabled(viewModel.recordingState != .idle)
         .help("Choose window to record")
     }

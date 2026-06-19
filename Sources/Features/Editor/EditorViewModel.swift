@@ -298,6 +298,31 @@ final class EditorViewModel: ObservableObject {
         currentClipSegments.count > 1
     }
 
+    var canSplitTimelineSelection: Bool {
+        if selectedManualZoomSegment != nil {
+            return canSplitSelectedManualZoomSegment
+        }
+        return canSplitClip
+    }
+
+    var canDeleteTimelineSelection: Bool {
+        if selectedManualZoomSegment != nil {
+            return canDeleteSelectedManualZoomSegment
+        }
+        return canDeleteSelectedClip
+    }
+
+    var timelineSelectionLabel: String {
+        selectedManualZoomSegment == nil ? "Clip" : "Zoom"
+    }
+
+    var canSplitSelectedManualZoomSegment: Bool {
+        guard let segment = selectedManualZoomSegment else { return false }
+        let splitPoint = previewTimestamp.clamped(to: segment.start...segment.end)
+        return splitPoint - segment.start >= minimumManualZoomDuration
+            && segment.end - splitPoint >= minimumManualZoomDuration
+    }
+
     func selectClipSegment(at index: Int) {
         let segments = currentClipSegments
         guard segments.indices.contains(index) else { return }
@@ -327,6 +352,14 @@ final class EditorViewModel: ObservableObject {
         applyClipSegments(segments, selectedIndex: index + 1, workingProject: workingProject)
     }
 
+    func splitTimelineSelectionAtPlayhead() {
+        if selectedManualZoomSegment != nil {
+            splitSelectedManualZoomSegmentAtPlayhead()
+        } else {
+            splitClipAtPlayhead()
+        }
+    }
+
     func deleteSelectedClip() {
         guard let workingProject = project ?? sourceProject, canDeleteSelectedClip else { return }
 
@@ -335,6 +368,14 @@ final class EditorViewModel: ObservableObject {
         segments.remove(at: selectedClipSegmentIndex)
         let nextIndex = min(selectedClipSegmentIndex, max(segments.count - 1, 0))
         applyClipSegments(segments, selectedIndex: nextIndex, workingProject: workingProject)
+    }
+
+    func deleteTimelineSelection() {
+        if selectedManualZoomSegment != nil {
+            deleteSelectedManualZoomSegment()
+        } else {
+            deleteSelectedClip()
+        }
     }
 
     func resetClips() {
@@ -387,6 +428,38 @@ final class EditorViewModel: ObservableObject {
         let segments = manualZoomSegments.filter { $0.id != selectedManualZoomSegmentID }
         isAdjustingManualZoomArea = false
         applyManualZoomSegments(segments, selectedID: segments.first?.id, workingProject: workingProject)
+    }
+
+    func splitSelectedManualZoomSegmentAtPlayhead() {
+        guard let selectedManualZoomSegmentID,
+              let workingProject = project ?? sourceProject,
+              let index = manualZoomSegments.firstIndex(where: { $0.id == selectedManualZoomSegmentID }) else {
+            return
+        }
+
+        let segment = manualZoomSegments[index]
+        let splitPoint = previewTimestamp.clamped(to: segment.start...segment.end)
+        guard splitPoint - segment.start >= minimumManualZoomDuration,
+              segment.end - splitPoint >= minimumManualZoomDuration else {
+            return
+        }
+
+        let left = segment.updating(end: splitPoint)
+        let right = ManualZoomSegment(
+            start: splitPoint,
+            end: segment.end,
+            focus: segment.focus,
+            zoomLevel: segment.zoomLevel,
+            easeInDuration: min(segment.easeInDuration, max(segment.end - splitPoint, 0) / 2),
+            easeOutDuration: min(segment.easeOutDuration, max(segment.end - splitPoint, 0) / 2),
+            source: segment.source
+        )
+
+        var segments = manualZoomSegments
+        segments[index] = left
+        segments.insert(right, at: index + 1)
+        isAdjustingManualZoomArea = false
+        applyManualZoomSegments(segments, selectedID: right.id, workingProject: workingProject)
     }
 
     func toggleManualZoomAreaAdjustment() {

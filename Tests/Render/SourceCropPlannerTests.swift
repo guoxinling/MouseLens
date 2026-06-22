@@ -311,6 +311,20 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual((origin.y + CursorGeometry.hotspot.y) * scale, tip.y, accuracy: 0.0001)
     }
 
+    func testCoreImageCursorTemplateKeepsTipPinnedToEventPoint() {
+        let tip = CGPoint(x: 420, y: 260)
+        let scale: CGFloat = 1.35
+        let origin = CursorGeometry.coreImageTemplateOrigin(forTip: tip, scale: scale)
+
+        XCTAssertEqual(origin.x + (CursorGeometry.coreImageHotspot.x * scale), tip.x, accuracy: 0.0001)
+        XCTAssertEqual(origin.y + (CursorGeometry.coreImageHotspot.y * scale), tip.y, accuracy: 0.0001)
+        XCTAssertEqual(
+            CursorGeometry.coreImageHotspot.y,
+            CursorGeometry.templateSize.height - CursorGeometry.hotspot.y,
+            accuracy: 0.0001
+        )
+    }
+
     func testRealtimePreviewGeometryScalesVideoWhenManualZoomIsActive() {
         let contentRect = CGRect(x: 0, y: 0, width: 1440, height: 810)
         let geometry = RealtimePreviewGeometry(

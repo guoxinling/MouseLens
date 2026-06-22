@@ -1,4 +1,5 @@
 .DS_Store
+**/.DS_Store
 
 # Xcode build products and local caches
 .DerivedData*/
@@ -6,6 +7,8 @@
 Build/
 BuildRelease/
 .LocalTestApp/
+.Archives/
+.AppStoreExport/
 *.app
 *.app.dSYM
 *.dSYM

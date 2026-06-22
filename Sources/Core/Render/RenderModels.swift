@@ -103,11 +103,22 @@ enum PointerSmoothingMode {
 enum CursorGeometry {
     static let templateSize = CGSize(width: 44, height: 44)
     static let hotspot = CGPoint(x: 5, y: 5)
+    static let coreImageHotspot = CGPoint(
+        x: hotspot.x,
+        y: templateSize.height - hotspot.y
+    )
 
     static func origin(forTip tip: CGPoint, scale: CGFloat) -> CGPoint {
         CGPoint(
             x: (tip.x / max(scale, 0.0001)) - hotspot.x,
             y: (tip.y / max(scale, 0.0001)) - hotspot.y
+        )
+    }
+
+    static func coreImageTemplateOrigin(forTip tip: CGPoint, scale: CGFloat) -> CGPoint {
+        CGPoint(
+            x: tip.x - (coreImageHotspot.x * scale),
+            y: tip.y - (coreImageHotspot.y * scale)
         )
     }
 }
@@ -553,7 +564,6 @@ private struct PreparedRenderAssets {
     let layout: RenderLayout
     let backgroundImage: CIImage
     let transparentCanvas: CIImage
-    let maskImage: CIImage
 }
 
 private final class ExportSessionBox: @unchecked Sendable {
@@ -1134,12 +1144,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 cornerRadius: style.cornerRadius,
                 shadowRadius: style.shadowRadius
             ),
-            transparentCanvas: CIImage(color: .clear).cropped(to: layout.fullRect),
-            maskImage: makeRoundedMaskImage(
-                size: layout.renderSize,
-                contentRect: layout.contentRect,
-                cornerRadius: style.cornerRadius
-            )
+            transparentCanvas: CIImage(color: .clear).cropped(to: layout.fullRect)
         )
     }
 
@@ -1158,29 +1163,39 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
         let cropRect = presentation.cropRect
         let displayRect = presentation.displayRect
+        let ciDisplayRect = coreImageRect(fromTopOriginRect: displayRect, in: preparedAssets.layout.fullRect)
 
-        let translated = sourceImage
+        let transparentCropCanvas = CIImage(color: .clear).cropped(to: cropRect)
+        let croppedSource = sourceImage
+            .composited(over: transparentCropCanvas)
             .cropped(to: cropRect)
+
+        let translated = croppedSource
             .transformed(by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY))
 
-        let scaleX = displayRect.width / cropRect.width
-        let scaleY = displayRect.height / cropRect.height
+        let scaleX = ciDisplayRect.width / cropRect.width
+        let scaleY = ciDisplayRect.height / cropRect.height
 
         let positioned = translated
             .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
             .transformed(
                 by: CGAffineTransform(
-                    translationX: displayRect.minX,
-                    y: displayRect.minY
+                    translationX: ciDisplayRect.minX,
+                    y: ciDisplayRect.minY
                 )
             )
 
         let contentOnCanvas = positioned.composited(over: preparedAssets.transparentCanvas)
+        let videoMask = makeRoundedMaskImage(
+            size: preparedAssets.layout.renderSize,
+            contentRect: ciDisplayRect,
+            cornerRadius: project.style.cornerRadius
+        )
         let maskedContent = contentOnCanvas.applyingFilter(
             "CIBlendWithMask",
             parameters: [
                 kCIInputBackgroundImageKey: preparedAssets.transparentCanvas,
-                kCIInputMaskImageKey: preparedAssets.maskImage
+                kCIInputMaskImageKey: videoMask
             ]
         )
 
@@ -1205,6 +1220,19 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
 
         return withCursor.composited(over: preparedAssets.backgroundImage)
+    }
+
+    private func coreImageRect(fromTopOriginRect rect: CGRect, in fullRect: CGRect) -> CGRect {
+        CGRect(
+            x: rect.minX,
+            y: fullRect.height - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    private func coreImagePoint(fromTopOriginPoint point: CGPoint, in fullRect: CGRect) -> CGPoint {
+        CGPoint(x: point.x, y: fullRect.height - point.y)
     }
 
     private func makeBackgroundImage(
@@ -1361,7 +1389,12 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             layout: layout,
             displayRect: displayRect
         )
-        return applyClickRipple(to: image, point: point, intensity: 1.0, layout: layout)
+        return applyClickRipple(
+            to: image,
+            point: coreImagePoint(fromTopOriginPoint: point, in: layout.fullRect),
+            intensity: 1.0,
+            layout: layout
+        )
     }
 
     private func applyClickRipple(
@@ -1421,6 +1454,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             layout: layout,
             displayRect: displayRect
         )
+        let ciPoint = coreImagePoint(fromTopOriginPoint: point, in: layout.fullRect)
 
         var layeredImage = image
         if pointerSnapshot.isClickActive, let clickLocation = pointerSnapshot.clickLocation {
@@ -1432,14 +1466,19 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 displayRect: displayRect
             )
             let intensity = (0.45 + (pointerSnapshot.clickProgress * 0.55)).clamped(to: 0.45...1.0)
-            layeredImage = applyClickRipple(to: layeredImage, point: clickPoint, intensity: intensity, layout: layout)
+            layeredImage = applyClickRipple(
+                to: layeredImage,
+                point: coreImagePoint(fromTopOriginPoint: clickPoint, in: layout.fullRect),
+                intensity: intensity,
+                layout: layout
+            )
         }
 
         let baseScale = (min(layout.contentRect.width, layout.contentRect.height) / 1050).clamped(to: 0.78...1.08)
         let scale = baseScale * (1 + (pointerSnapshot.clickProgress * 0.05))
-        let origin = CursorGeometry.origin(forTip: point, scale: scale)
-        let transform = CGAffineTransform(scaleX: scale, y: scale)
-            .translatedBy(x: origin.x, y: origin.y)
+        let origin = CursorGeometry.coreImageTemplateOrigin(forTip: ciPoint, scale: scale)
+        let transform = CGAffineTransform(translationX: origin.x, y: origin.y)
+            .scaledBy(x: scale, y: scale)
 
         let cursor = cursorTemplateImage
             .transformed(by: transform)
@@ -1477,6 +1516,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         }
 
         context.clear(CGRect(origin: .zero, size: size))
+        context.translateBy(x: 0, y: size.height)
+        context.scaleBy(x: 1, y: -1)
 
         let cursorPath = CGMutablePath()
         cursorPath.move(to: CGPoint(x: 5, y: 5))

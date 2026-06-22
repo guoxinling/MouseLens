@@ -90,7 +90,13 @@ rm -rf "$CANONICAL_APP_PATH"
 ditto "$BUILT_APP_PATH" "$CANONICAL_APP_PATH"
 
 echo "Re-signing canonical app with stable local designated requirement..."
-/usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier "com.guoxl.MouseLens"' "$CANONICAL_APP_PATH"
+/usr/bin/codesign \
+  --force \
+  --deep \
+  --sign - \
+  --entitlements "$ROOT_DIR/Resources/MouseLens.entitlements" \
+  --requirements '=designated => identifier "com.guoxl.MouseLens"' \
+  "$CANONICAL_APP_PATH"
 
 if [[ "$RESET_PERMISSIONS" -eq 1 ]]; then
   echo "Resetting local macOS permissions for $BUNDLE_IDENTIFIER..."

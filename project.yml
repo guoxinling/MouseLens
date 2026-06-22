@@ -8,7 +8,6 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     MACOSX_DEPLOYMENT_TARGET: 14.0
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
 targets:
   MouseLens:
     type: application
@@ -16,14 +15,8 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - Sources
-    resources:
-      - Resources
-    postBuildScripts:
-      - name: Stabilize local screen-recording identity
-        script: |
-          if [ -d "${TARGET_BUILD_DIR}/${WRAPPER_NAME}" ]; then
-            /usr/bin/codesign --force --deep --sign - --requirements '=designated => identifier "com.guoxl.MouseLens"' "${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
-          fi
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.guoxl.MouseLens
@@ -34,6 +27,15 @@ targets:
         INFOPLIST_KEY_NSAppleEventsUsageDescription: MouseLens uses accessibility support to detect pointer activity for automatic camera moves.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: MouseLens can include microphone audio in recordings.
         INFOPLIST_KEY_NSSystemAdministrationUsageDescription: MouseLens uses system permissions to record the screen and observe cursor activity.
+      configs:
+        Debug:
+          ENABLE_APP_SANDBOX: NO
+          ENABLE_HARDENED_RUNTIME: NO
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Resources/MouseLens.entitlements
+          DEVELOPMENT_TEAM: 6UYTZXY3H9
+          ENABLE_APP_SANDBOX: YES
+          ENABLE_HARDENED_RUNTIME: YES
     scheme:
       testTargets:
         - MouseLensTests

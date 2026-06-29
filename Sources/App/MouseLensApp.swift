@@ -13,9 +13,11 @@ struct MouseLensApp: App {
 
     init() {
         let environment = AppEnvironment.live()
+        let coordinator = AppCoordinator()
+        let homeViewModel = HomeViewModel(environment: environment)
         self.environment = environment
-        _coordinator = StateObject(wrappedValue: AppCoordinator())
-        _homeViewModel = StateObject(wrappedValue: HomeViewModel(environment: environment))
+        _coordinator = StateObject(wrappedValue: coordinator)
+        _homeViewModel = StateObject(wrappedValue: homeViewModel)
         _editorViewModel = StateObject(
             wrappedValue: EditorViewModel(
                 exportCoordinator: environment.exportCoordinator,
@@ -25,6 +27,19 @@ struct MouseLensApp: App {
                 preferencesStore: environment.preferencesStore
             )
         )
+
+        MouseLensAppDelegate.openCaptureToolbarHandler = {
+            if coordinator.activeProject != nil {
+                environment.windowController.activateAppWindow()
+                return
+            }
+            environment.windowController.showCaptureSetupPanel {
+                HomeView(
+                    viewModel: homeViewModel,
+                    onProjectReady: { coordinator.open(project: $0) }
+                )
+            }
+        }
     }
 
     var body: some Scene {
@@ -152,8 +167,19 @@ private struct MenuBarCaptureView: View {
 
         Divider()
 
-        Button("Open MouseLens") {
-            windowController.activateAppWindow()
+        if coordinator.activeProject != nil {
+            Button("Open Editor") {
+                windowController.activateAppWindow()
+            }
+        } else {
+            Button("Open Capture Toolbar") {
+                windowController.showCaptureSetupPanel {
+                    HomeView(
+                        viewModel: viewModel,
+                        onProjectReady: { coordinator.open(project: $0) }
+                    )
+                }
+            }
         }
 
         if coordinator.activeProject != nil {
@@ -184,20 +210,36 @@ private struct MenuBarCaptureView: View {
     }
 }
 
+@MainActor
 final class MouseLensAppDelegate: NSObject, NSApplicationDelegate {
+    static var openCaptureToolbarHandler: (() -> Void)?
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if sender.windows.contains(where: { $0.contentLayoutRect.height <= 120 }) {
+            Self.openCaptureToolbarHandler?()
+            return false
+        }
+
         guard !flag else { return true }
 
         if let window = sender.windows.first(where: { window in
             window.canBecomeKey && !window.isMiniaturized
         }) {
             sender.unhide(nil)
+            if window.contentLayoutRect.height <= 120 {
+                window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary, .stationary])
+                window.level = .floating
+                window.sharingType = .none
+                window.orderFrontRegardless()
+            } else {
+                window.makeKeyAndOrderFront(nil)
+            }
             sender.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
             return false
         }
 
-        return true
+        Self.openCaptureToolbarHandler?()
+        return false
     }
 }
 

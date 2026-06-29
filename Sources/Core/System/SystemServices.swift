@@ -109,6 +109,7 @@ struct Logger {
 final class AppWindowController {
     private var hiddenForCapture = false
     private weak var appWindow: NSWindow?
+    private var captureSetupPanel: NSPanel?
     private var recordingControlPanel: NSPanel?
     private var showsZoomButtonForAppWindow = false
     private var allowsBackgroundDraggingForAppWindow = true
@@ -134,11 +135,13 @@ final class AppWindowController {
             preservesLargerContentSize: false,
             exitsZoomedState: true
         )
+        controlledWindows.forEach(configureCaptureToolbarSpaceBehavior)
     }
 
     func applyEditorWindowLayout() {
         showsZoomButtonForAppWindow = true
         allowsBackgroundDraggingForAppWindow = false
+        controlledWindows.forEach(configureStandardSpaceBehavior)
         configureAppWindows(
             contentSize: NSSize(width: 1120, height: 720),
             minContentSize: NSSize(width: 1120, height: 720),
@@ -179,20 +182,47 @@ final class AppWindowController {
     }
 
     func activateAppWindow() {
+        hideCaptureSetupPanel()
         let app = NSApplication.shared
         app.unhide(nil)
-        app.activate(ignoringOtherApps: true)
 
         if let appWindow, appWindow.canBecomeKey {
-            appWindow.makeKeyAndOrderFront(nil)
+            if isCaptureToolbarWindow(appWindow) {
+                configureCaptureToolbarSpaceBehavior(appWindow)
+                positionCaptureToolbarOnActiveScreen(appWindow)
+                appWindow.orderFrontRegardless()
+            } else {
+                appWindow.makeKeyAndOrderFront(nil)
+            }
+            app.activate(ignoringOtherApps: true)
             return
         }
 
+        app.activate(ignoringOtherApps: true)
         app.windows.forEach { window in
             guard !isRecordingControlPanel(window) else { return }
             guard window.canBecomeKey else { return }
             window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    func showCaptureSetupPanel<Content: View>(@ViewBuilder content: () -> Content) {
+        let panel = captureSetupPanel ?? makeCaptureSetupPanel()
+        panel.contentViewController = NSHostingController(
+            rootView: content()
+                .frame(width: 1120, height: 96)
+                .background(AppTheme.windowBackground)
+        )
+        captureSetupPanel = panel
+
+        appWindow?.orderOut(nil)
+        positionCaptureToolbarOnActiveScreen(panel)
+        NSApplication.shared.unhide(nil)
+        panel.orderFrontRegardless()
+    }
+
+    func hideCaptureSetupPanel() {
+        captureSetupPanel?.orderOut(nil)
     }
 
     func showRecordingControlPanel<Content: View>(@ViewBuilder content: () -> Content) {
@@ -255,7 +285,10 @@ final class AppWindowController {
         }
 
         return NSApplication.shared.windows.filter { window in
-            !isRecordingControlPanel(window) && window.canBecomeKey && !window.isSheet
+            !isRecordingControlPanel(window) &&
+                !isCaptureSetupPanel(window) &&
+                window.canBecomeKey &&
+                !window.isSheet
         }
     }
 
@@ -323,8 +356,30 @@ final class AppWindowController {
         return panel
     }
 
+    private func makeCaptureSetupPanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 96),
+            styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.backgroundColor = .clear
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.isOpaque = false
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.sharingType = .none
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isEnabled = false
+        return panel
+    }
+
     private func positionRecordingControlPanel(_ panel: NSPanel) {
-        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screenFrame = activeScreen.visibleFrame
         let panelSize = NSSize(width: 360, height: 58)
         let origin = NSPoint(
             x: screenFrame.midX - (panelSize.width / 2),
@@ -332,6 +387,41 @@ final class AppWindowController {
         )
 
         panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+    }
+
+    private func configureCaptureToolbarSpaceBehavior(_ window: NSWindow) {
+        window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary, .stationary])
+        window.level = .floating
+        window.sharingType = .none
+        window.hidesOnDeactivate = false
+    }
+
+    private func configureStandardSpaceBehavior(_ window: NSWindow) {
+        window.collectionBehavior.remove(.canJoinAllSpaces)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+        window.collectionBehavior.remove(.stationary)
+        window.level = .normal
+    }
+
+    private func positionCaptureToolbarOnActiveScreen(_ window: NSWindow) {
+        let visibleFrame = activeScreen.visibleFrame
+        let frame = window.frame
+        let origin = NSPoint(
+            x: visibleFrame.midX - (frame.width / 2),
+            y: visibleFrame.maxY - frame.height - 18
+        )
+        window.setFrameOrigin(origin)
+    }
+
+    private var activeScreen: NSScreen {
+        let pointerLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { $0.frame.contains(pointerLocation) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first!
+    }
+
+    private func isCaptureToolbarWindow(_ window: NSWindow) -> Bool {
+        !showsZoomButtonForAppWindow && window.contentLayoutRect.height <= 120
     }
 
     private func configureStandardWindowButtons(
@@ -350,6 +440,11 @@ final class AppWindowController {
     private func isRecordingControlPanel(_ window: NSWindow) -> Bool {
         guard let recordingControlPanel else { return false }
         return window === recordingControlPanel
+    }
+
+    private func isCaptureSetupPanel(_ window: NSWindow) -> Bool {
+        guard let captureSetupPanel else { return false }
+        return window === captureSetupPanel
     }
 }
 

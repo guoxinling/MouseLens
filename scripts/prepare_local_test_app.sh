@@ -77,6 +77,7 @@ xcodebuild \
   -scheme MouseLens \
   -configuration Release \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  CODE_SIGNING_ALLOWED=NO \
   build
 
 if [[ ! -d "$BUILT_APP_PATH" ]]; then

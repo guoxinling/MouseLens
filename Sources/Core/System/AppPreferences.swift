@@ -8,6 +8,7 @@ final class AppPreferencesStore: ObservableObject {
         static let hideWindowBeforeCapture = "preferences.hideWindowBeforeCapture"
         static let defaultMicrophoneEnabled = "preferences.defaultMicrophoneEnabled"
         static let defaultSystemAudioEnabled = "preferences.defaultSystemAudioEnabled"
+        static let defaultCaptureTarget = "preferences.defaultCaptureTarget"
         static let defaultAspectRatio = "preferences.defaultAspectRatio"
         static let autoRevealExportInFinder = "preferences.autoRevealExportInFinder"
     }
@@ -35,6 +36,10 @@ final class AppPreferencesStore: ObservableObject {
         didSet { defaults.set(defaultSystemAudioEnabled, forKey: Keys.defaultSystemAudioEnabled) }
     }
 
+    @Published var defaultCaptureTarget: CaptureTarget {
+        didSet { defaults.set(defaultCaptureTarget.rawValue, forKey: Keys.defaultCaptureTarget) }
+    }
+
     @Published var defaultAspectRatio: ProjectAspectRatio {
         didSet { defaults.set(defaultAspectRatio.rawValue, forKey: Keys.defaultAspectRatio) }
     }
@@ -53,6 +58,8 @@ final class AppPreferencesStore: ObservableObject {
         hideWindowBeforeCapture = defaults.object(forKey: Keys.hideWindowBeforeCapture) as? Bool ?? true
         defaultMicrophoneEnabled = defaults.object(forKey: Keys.defaultMicrophoneEnabled) as? Bool ?? true
         defaultSystemAudioEnabled = defaults.object(forKey: Keys.defaultSystemAudioEnabled) as? Bool ?? false
+        defaultCaptureTarget = defaults.string(forKey: Keys.defaultCaptureTarget)
+            .flatMap(CaptureTarget.init(rawValue:)) ?? .screen
 
         if
             let rawAspectRatio = defaults.string(forKey: Keys.defaultAspectRatio),

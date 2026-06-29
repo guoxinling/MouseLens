@@ -46,32 +46,11 @@ struct MouseLensApp: App {
         }
 
         MenuBarExtra("MouseLens", systemImage: menuBarSymbolName) {
-            Button(homeViewModel.menuBarPrimaryActionTitle) {
-                Task { await homeViewModel.handleRecordingToggleHotkey() }
-            }
-
-            Divider()
-
-            Button("Open MouseLens") {
-                environment.windowController.activateAppWindow()
-            }
-
-            if coordinator.activeProject != nil {
-                Button("Back to Home") {
-                    coordinator.showHome()
-                    environment.windowController.activateAppWindow()
-                }
-            }
-
-            SettingsLink {
-                Text("Settings…")
-            }
-
-            Divider()
-
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+            MenuBarCaptureView(
+                coordinator: coordinator,
+                viewModel: homeViewModel,
+                windowController: environment.windowController
+            )
         }
     }
 
@@ -83,6 +62,124 @@ struct MouseLensApp: App {
             return "timer.circle"
         case .recording(let session):
             return session.isPaused ? "pause.circle.fill" : "stop.circle.fill"
+        }
+    }
+}
+
+private struct MenuBarCaptureView: View {
+    @ObservedObject var coordinator: AppCoordinator
+    @ObservedObject var viewModel: HomeViewModel
+    let windowController: AppWindowController
+
+    var body: some View {
+        Text(viewModel.captureConfigurationSummary)
+
+        Button(viewModel.menuBarPrimaryActionTitle) {
+            Task { await viewModel.handleRecordingToggleHotkey() }
+        }
+
+        if case .recording(let session) = viewModel.recordingState {
+            Button(session.isPaused ? "Resume Recording" : "Pause Recording") {
+                viewModel.toggleRecordingPause()
+            }
+        }
+
+        if viewModel.recordingState == .idle {
+            Divider()
+
+            Menu("Capture Target") {
+                ForEach(CaptureTarget.allCases, id: \.self) { target in
+                    Button {
+                        viewModel.selectedCaptureTarget = target
+                    } label: {
+                        Label(
+                            target.label,
+                            systemImage: viewModel.selectedCaptureTarget == target
+                                ? "checkmark"
+                                : captureTargetSymbol(for: target)
+                        )
+                    }
+                }
+            }
+
+            if viewModel.selectedCaptureTarget == .window {
+                Menu("Window: \(viewModel.selectedWindowTargetLabel)") {
+                    Button {
+                        Task { await viewModel.refreshWindowTargets() }
+                    } label: {
+                        Label("Refresh Windows", systemImage: "arrow.clockwise")
+                    }
+
+                    Divider()
+
+                    if viewModel.availableWindowTargets.isEmpty {
+                        Text("No recordable windows")
+                    } else {
+                        ForEach(viewModel.availableWindowTargets) { target in
+                            Button {
+                                viewModel.selectWindowTarget(target)
+                            } label: {
+                                Label(
+                                    target.displayLabel,
+                                    systemImage: target.id == viewModel.selectedWindowTargetID
+                                        ? "checkmark"
+                                        : "macwindow"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Toggle("Microphone", isOn: $viewModel.includeMicrophone)
+            Toggle("System Audio", isOn: $viewModel.includeSystemAudio)
+
+            Menu("Aspect Ratio: \(viewModel.selectedAspectRatio.label)") {
+                ForEach(ProjectAspectRatio.allCases, id: \.self) { ratio in
+                    Button {
+                        viewModel.selectedAspectRatio = ratio
+                    } label: {
+                        Label(
+                            ratio.label,
+                            systemImage: viewModel.selectedAspectRatio == ratio
+                                ? "checkmark"
+                                : "rectangle"
+                        )
+                    }
+                }
+            }
+        }
+
+        Divider()
+
+        Button("Open MouseLens") {
+            windowController.activateAppWindow()
+        }
+
+        if coordinator.activeProject != nil {
+            Button("Back to Home") {
+                coordinator.showHome()
+                windowController.activateAppWindow()
+            }
+        }
+
+        SettingsLink {
+            Text("Settings…")
+        }
+
+        Divider()
+
+        Button("Quit") {
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
+    private func captureTargetSymbol(for target: CaptureTarget) -> String {
+        switch target {
+        case .screen:
+            return "display"
+        case .window:
+            return "macwindow"
         }
     }
 }

@@ -162,7 +162,6 @@ final class AppWindowController {
             guard !isRecordingControlPanel(window) else { return }
             window.orderOut(nil)
         }
-        app.hide(nil)
 
         try? await Task.sleep(nanoseconds: 250_000_000)
     }

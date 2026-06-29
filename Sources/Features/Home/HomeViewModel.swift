@@ -5,6 +5,9 @@ import Foundation
 final class HomeViewModel: ObservableObject {
     @Published var selectedCaptureTarget: CaptureTarget = .screen {
         didSet {
+            if !isApplyingDefaults {
+                environment.preferencesStore.defaultCaptureTarget = selectedCaptureTarget
+            }
             guard selectedCaptureTarget == .window else { return }
             Task { [weak self] in
                 await self?.refreshWindowTargets()
@@ -63,15 +66,21 @@ final class HomeViewModel: ObservableObject {
     var menuBarPrimaryActionTitle: String {
         switch recordingState {
         case .idle:
-            return "Start Recording"
+            return selectedCaptureTarget == .screen ? "Record Screen" : "Record Window"
         case .countdown:
             return "Cancel Countdown"
         case .recording(let session):
-            if session.isPaused {
-                return "Stop Recording (Paused)"
-            }
-            return "Stop Recording"
+            return session.isPaused ? "Finish Recording (Paused)" : "Finish Recording"
         }
+    }
+
+    var captureConfigurationSummary: String {
+        let audioParts = [
+            includeMicrophone ? "Mic" : nil,
+            includeSystemAudio ? "System Audio" : nil
+        ].compactMap { $0 }
+        let audioSummary = audioParts.isEmpty ? "No Audio" : audioParts.joined(separator: " + ")
+        return "\(selectedCaptureTarget.label) · \(selectedAspectRatio.label) · \(audioSummary)"
     }
 
     var selectedWindowTarget: CaptureWindowOption? {
@@ -397,6 +406,7 @@ final class HomeViewModel: ObservableObject {
 
     private func applyPreferences() {
         isApplyingDefaults = true
+        selectedCaptureTarget = environment.preferencesStore.defaultCaptureTarget
         includeMicrophone = environment.preferencesStore.defaultMicrophoneEnabled
         includeSystemAudio = environment.preferencesStore.defaultSystemAudioEnabled
         selectedAspectRatio = environment.preferencesStore.defaultAspectRatio
@@ -404,6 +414,14 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func bindPreferences() {
+        environment.preferencesStore.$defaultCaptureTarget
+            .dropFirst()
+            .sink { [weak self] (_: CaptureTarget) in
+                guard let self, self.recordingState == .idle else { return }
+                self.applyPreferences()
+            }
+            .store(in: &cancellables)
+
         environment.preferencesStore.$defaultMicrophoneEnabled
             .dropFirst()
             .sink { [weak self] (_: Bool) in

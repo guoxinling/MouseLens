@@ -107,6 +107,8 @@ struct Logger {
 
 @MainActor
 final class AppWindowController {
+    static let captureSetupContentSize = NSSize(width: 1120, height: 96)
+
     private var hiddenForCapture = false
     private weak var appWindow: NSWindow?
     private var captureSetupPanel: NSPanel?
@@ -225,15 +227,27 @@ final class AppWindowController {
         let panel = captureSetupPanel ?? makeCaptureSetupPanel()
         panel.contentViewController = NSHostingController(
             rootView: content()
-                .frame(width: 1120, height: 96)
+                .frame(
+                    width: Self.captureSetupContentSize.width,
+                    height: Self.captureSetupContentSize.height
+                )
                 .background(AppTheme.windowBackground)
         )
         captureSetupPanel = panel
 
+        if appWindow?.isMiniaturized == true {
+            appWindow?.deminiaturize(nil)
+        }
         appWindow?.orderOut(nil)
+        Self.prepareCaptureSetupPanelForDisplay(panel)
         positionCaptureToolbarOnActiveScreen(panel)
         NSApplication.shared.unhide(nil)
         panel.orderFrontRegardless()
+
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, panel.isVisible else { return }
+            self.positionCaptureToolbarOnActiveScreen(panel)
+        }
     }
 
     func hideCaptureSetupPanel() {
@@ -379,7 +393,7 @@ final class AppWindowController {
 
     private func makeCaptureSetupPanel() -> NSPanel {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 96),
+            contentRect: NSRect(origin: .zero, size: Self.captureSetupContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -397,6 +411,13 @@ final class AppWindowController {
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isEnabled = false
         return panel
+    }
+
+    static func prepareCaptureSetupPanelForDisplay(_ panel: NSPanel) {
+        if panel.isMiniaturized {
+            panel.deminiaturize(nil)
+        }
+        panel.setContentSize(captureSetupContentSize)
     }
 
     private func positionRecordingControlPanel(_ panel: NSPanel) {

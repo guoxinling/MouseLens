@@ -17,4 +17,21 @@ final class AppWindowControllerTests: XCTestCase {
         XCTAssertEqual(origin.y, 245, accuracy: 0.001)
     }
 
+    func testPreparingCapturePanelEstablishesSizeBeforePositioning() {
+        let panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.titled, .closable, .miniaturizable, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        AppWindowController.prepareCaptureSetupPanelForDisplay(panel)
+        let expectedFrameSize = panel.frameRect(
+            forContentRect: NSRect(origin: .zero, size: AppWindowController.captureSetupContentSize)
+        ).size
+
+        XCTAssertEqual(panel.frame.width, expectedFrameSize.width, accuracy: 0.001)
+        XCTAssertEqual(panel.frame.height, expectedFrameSize.height, accuracy: 0.001)
+    }
+
 }

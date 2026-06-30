@@ -176,17 +176,17 @@ Recommended structure:
 - Recovery state:
   - Show `Retry Preview` only when live preview fails or becomes unavailable.
   - Do not show a normal `Refresh` button in the steady state.
-- Presets tab:
+- Format cards:
   - MP4, H.264.
-  - GIF.
-- Custom tab:
-  - Format.
+  - GIF, disabled until the GIF encoder milestone.
+- Selecting a format loads recommended values.
+- Recommended values remain editable in one settings section:
   - Resolution.
   - Frame rate.
   - Quality.
   - Include cursor.
   - Include click feedback.
-  - Include camera bubble, disabled until camera is implemented.
+- Modified settings show a quiet `Modified` state and can be reset to recommended values.
 - Footer:
   - Primary export button.
   - Estimated size.

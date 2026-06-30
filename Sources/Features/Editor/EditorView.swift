@@ -2,11 +2,17 @@ import AppKit
 import SwiftUI
 
 struct EditorView: View {
+    private enum InspectorMode {
+        case editing
+        case export
+    }
+
     @ObservedObject var viewModel: EditorViewModel
     let project: RecordingProject
     let onBack: () -> Void
     @State private var isDraggingPlayhead = false
     @State private var isDraggingTimeline = false
+    @State private var inspectorMode: InspectorMode = .editing
 
     private let playheadDragSensitivity: CGFloat = 0.55
     private let trimHandleDragSensitivity: CGFloat = 0.18
@@ -37,7 +43,7 @@ struct EditorView: View {
                     ScrollView {
                         VStack(spacing: 18) {
                             previewArea(project: displayProject, minimumHeight: 320)
-                            inspector(project: displayProject, fixedWidth: nil)
+                            activeInspector(project: displayProject, fixedWidth: nil)
                             clipTimeline(project: displayProject)
                         }
                         .padding(20)
@@ -58,13 +64,14 @@ struct EditorView: View {
                         Divider()
                             .overlay(AppTheme.panelBorder.opacity(0.45))
 
-                        inspector(project: displayProject, fixedWidth: 326)
+                        activeInspector(project: displayProject, fixedWidth: 326)
                     }
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .task(id: project.id) {
+            inspectorMode = .editing
             viewModel.configure(for: project)
         }
         .sheet(isPresented: $viewModel.showExportSheet) {
@@ -95,22 +102,22 @@ struct EditorView: View {
 
             previewStatus(project: project)
 
-            Button {
-                viewModel.refreshPreviewVideo()
-            } label: {
-                Image(systemName: "arrow.clockwise")
+            if case .failed = viewModel.previewVideoState {
+                Button {
+                    viewModel.refreshPreviewVideo()
+                } label: {
+                    Label("Retry Preview", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(project.sourceVideoURL == nil)
             }
-            .buttonStyle(.borderless)
-            .help("Refresh preview")
-            .disabled(viewModel.previewVideoState.isWorking || project.sourceVideoURL == nil)
 
             Button {
-                Task { await viewModel.export() }
+                inspectorMode = .export
             } label: {
-                Label(viewModel.exportState == .exporting ? "Exporting" : "Export", systemImage: "square.and.arrow.up")
+                Label("Export", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.exportState == .exporting)
         }
         .padding(.horizontal, 20)
         .frame(height: 60)
@@ -233,26 +240,26 @@ struct EditorView: View {
                     manualZoomInspector(project: project)
                 }
 
-                inspectorSection(title: "Export", systemImage: "square.and.arrow.up") {
-                    Picker("Preset", selection: $viewModel.exportPreset) {
-                        ForEach(ExportPreset.allCases, id: \.self) { preset in
-                            Text(preset.label).tag(preset)
-                        }
-                    }
-
-                    if case .failed(let message) = viewModel.exportState {
-                        Text(message)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red)
-                            .lineLimit(3)
-                    }
-                }
             }
             .padding(20)
         }
         .frame(width: fixedWidth)
         .frame(maxWidth: fixedWidth == nil ? .infinity : fixedWidth)
         .background(Color.white.opacity(0.04))
+    }
+
+    @ViewBuilder
+    private func activeInspector(project: RecordingProject, fixedWidth: CGFloat?) -> some View {
+        switch inspectorMode {
+        case .editing:
+            inspector(project: project, fixedWidth: fixedWidth)
+        case .export:
+            ExportPanelView(
+                viewModel: viewModel,
+                fixedWidth: fixedWidth,
+                onBack: { inspectorMode = .editing }
+            )
+        }
     }
 
     private func inspectorSection<Content: View>(

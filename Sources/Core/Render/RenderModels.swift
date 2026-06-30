@@ -5,6 +5,117 @@ import CoreGraphics
 import CoreVideo
 import Foundation
 
+enum ExportFormat: String, CaseIterable, Equatable {
+    case mp4
+    case gif
+
+    var label: String {
+        switch self {
+        case .mp4: "MP4"
+        case .gif: "GIF"
+        }
+    }
+
+    var isAvailable: Bool {
+        self == .mp4
+    }
+}
+
+enum ExportResolution: String, CaseIterable, Equatable {
+    case p1080
+    case p720
+    case p480
+
+    var label: String {
+        switch self {
+        case .p1080: "1080p"
+        case .p720: "720p"
+        case .p480: "480p"
+        }
+    }
+
+    func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
+        let dimensions: (long: CGFloat, short: CGFloat)
+        switch self {
+        case .p1080:
+            dimensions = (1920, 1080)
+        case .p720:
+            dimensions = (1280, 720)
+        case .p480:
+            dimensions = (854, 480)
+        }
+
+        switch aspectRatio {
+        case .landscape:
+            return CGSize(width: dimensions.long, height: dimensions.short)
+        case .portrait:
+            return CGSize(width: dimensions.short, height: dimensions.long)
+        case .square:
+            return CGSize(width: dimensions.short, height: dimensions.short)
+        }
+    }
+}
+
+enum ExportFrameRate: Int32, CaseIterable, Equatable {
+    case fps15 = 15
+    case fps24 = 24
+    case fps30 = 30
+
+    var label: String {
+        "\(rawValue) fps"
+    }
+}
+
+enum ExportQuality: String, CaseIterable, Equatable {
+    case high
+    case balanced
+    case small
+
+    var label: String {
+        rawValue.capitalized
+    }
+
+    func averageBitRate(renderSize: CGSize, frameRate: ExportFrameRate) -> Int {
+        let baseBitRate: Double
+        switch self {
+        case .high:
+            baseBitRate = 8_000_000
+        case .balanced:
+            baseBitRate = 5_000_000
+        case .small:
+            baseBitRate = 3_000_000
+        }
+
+        let pixelScale = (renderSize.width * renderSize.height) / (1920 * 1080)
+        let frameScale = Double(frameRate.rawValue) / 30
+        return max(Int(baseBitRate * pixelScale * frameScale), 750_000)
+    }
+}
+
+struct ExportConfiguration: Equatable {
+    var format: ExportFormat
+    var resolution: ExportResolution
+    var frameRate: ExportFrameRate
+    var quality: ExportQuality
+    var includesCursor: Bool
+    var includesClickFeedback: Bool
+
+    static func recommended(for aspectRatio: ProjectAspectRatio) -> ExportConfiguration {
+        ExportConfiguration(
+            format: .mp4,
+            resolution: .p1080,
+            frameRate: .fps30,
+            quality: .high,
+            includesCursor: true,
+            includesClickFeedback: true
+        )
+    }
+
+    func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
+        resolution.renderSize(for: aspectRatio)
+    }
+}
+
 enum ExportPreset: String, CaseIterable {
     case standardLandscape
     case standardPortrait

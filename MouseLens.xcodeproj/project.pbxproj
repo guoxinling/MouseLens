@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C600B02748D9ED6E654808 /* PermissionGateView.swift */; };
+		097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */; };
 		0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */; };
 		118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92E933D7DB3407EA9D77750 /* ProjectModels.swift */; };
 		175F7434233F0509C9554848 /* RecordingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81318E147711A2C2F2CE4B4F /* RecordingState.swift */; };
@@ -60,6 +61,7 @@
 		035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanEngineTests.swift; sourceTree = "<group>"; };
 		10D9FFAFE17E315029467454 /* MouseLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseLensApp.swift; sourceTree = "<group>"; };
 		1182832D4DFB818974F0A533 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModel.swift; sourceTree = "<group>"; };
+		17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportConfigurationTests.swift; sourceTree = "<group>"; };
 		199ACA29EC75C5E19768EBE0 /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ObjCExceptionCatcher.m; sourceTree = "<group>"; };
 		21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportFilenameTests.swift; sourceTree = "<group>"; };
 		2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureModels.swift; sourceTree = "<group>"; };
@@ -356,6 +358,7 @@
 		E094F1D4F3920C143A5C02D2 /* Render */ = {
 			isa = PBXGroup;
 			children = (
+				17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */,
 				21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */,
 				B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */,
 				5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */,
@@ -481,6 +484,7 @@
 				E8FFF48F52F6ABFA901F9F01 /* AppWindowControllerTests.swift in Sources */,
 				F3DA86BB86CB67C5BFE2AAAF /* CameraPlanEngineTests.swift in Sources */,
 				6F49A6350B44E5F2413BE93A /* EditorViewModelTests.swift in Sources */,
+				097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */,
 				F522062460B28B6FD6B6AC5E /* ExportFilenameTests.swift in Sources */,
 				83108CE3CDEE77D84EFF625F /* ExportPresetTests.swift in Sources */,
 				88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */,

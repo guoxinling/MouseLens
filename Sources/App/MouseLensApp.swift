@@ -92,6 +92,7 @@ private struct MenuBarCaptureView: View {
         Button(viewModel.menuBarPrimaryActionTitle) {
             Task { await viewModel.handleRecordingToggleHotkey() }
         }
+        .disabled(viewModel.isRecordingActionDisabled)
 
         if case .recording(let session) = viewModel.recordingState {
             Button(session.isPaused ? "Resume Recording" : "Pause Recording") {

@@ -30,6 +30,7 @@ struct HomeView: View {
         }
         .onAppear {
             viewModel.refreshPermissions()
+            viewModel.captureToolbarDidAppear()
         }
     }
 
@@ -120,7 +121,7 @@ struct HomeView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(viewModel.permissions.needsScreenRecordingRelaunch)
+            .disabled(viewModel.isRecordingActionDisabled)
             .layoutPriority(10)
         }
         .frame(maxWidth: .infinity)

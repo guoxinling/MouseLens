@@ -111,10 +111,20 @@ final class AppWindowController {
     private weak var appWindow: NSWindow?
     private var captureSetupPanel: NSPanel?
     private var recordingControlPanel: NSPanel?
+    private var appWindowResizeObserver: NSObjectProtocol?
     private var showsZoomButtonForAppWindow = false
     private var allowsBackgroundDraggingForAppWindow = true
 
+    deinit {
+        if let appWindowResizeObserver {
+            NotificationCenter.default.removeObserver(appWindowResizeObserver)
+        }
+    }
+
     func attachAppWindow(_ window: NSWindow) {
+        if appWindow !== window {
+            observeAppWindowResize(window)
+        }
         appWindow = window
         configureStandardWindowButtons(
             for: window,
@@ -133,9 +143,13 @@ final class AppWindowController {
             allowsBackgroundDragging: true,
             showsZoomButton: false,
             preservesLargerContentSize: false,
-            exitsZoomedState: true
+            exitsZoomedState: true,
+            animatesResize: false
         )
-        controlledWindows.forEach(configureCaptureToolbarSpaceBehavior)
+        controlledWindows.forEach { window in
+            configureCaptureToolbarSpaceBehavior(window)
+            positionCaptureToolbarOnActiveScreen(window)
+        }
     }
 
     func applyEditorWindowLayout() {
@@ -152,7 +166,8 @@ final class AppWindowController {
             allowsBackgroundDragging: false,
             showsZoomButton: true,
             preservesLargerContentSize: true,
-            exitsZoomedState: false
+            exitsZoomedState: false,
+            animatesResize: true
         )
     }
 
@@ -248,7 +263,8 @@ final class AppWindowController {
         allowsBackgroundDragging: Bool,
         showsZoomButton: Bool,
         preservesLargerContentSize: Bool,
-        exitsZoomedState: Bool
+        exitsZoomedState: Bool,
+        animatesResize: Bool
     ) {
         controlledWindows.forEach { window in
             configureStandardWindowButtons(
@@ -274,7 +290,8 @@ final class AppWindowController {
             let targetHeight = min(max(proposedHeight, minContentSize.height), maxContentSize.height)
             setContentSizePreservingTopLeft(
                 NSSize(width: targetWidth, height: targetHeight),
-                for: window
+                for: window,
+                animate: animatesResize
             )
         }
     }
@@ -292,7 +309,11 @@ final class AppWindowController {
         }
     }
 
-    private func setContentSizePreservingTopLeft(_ contentSize: NSSize, for window: NSWindow) {
+    private func setContentSizePreservingTopLeft(
+        _ contentSize: NSSize,
+        for window: NSWindow,
+        animate: Bool
+    ) {
         let currentFrame = window.frame
         let currentContentSize = window.contentLayoutRect.size
         var adjustedFrame = currentFrame
@@ -310,7 +331,7 @@ final class AppWindowController {
         adjustedFrame = constrainedFrame(adjustedFrame, for: window)
         guard !NSEqualRects(adjustedFrame, currentFrame) else { return }
 
-        window.setFrame(adjustedFrame, display: true, animate: true)
+        window.setFrame(adjustedFrame, display: true, animate: animate)
     }
 
     private func constrainedFrame(_ frame: NSRect, for window: NSWindow) -> NSRect {
@@ -405,12 +426,40 @@ final class AppWindowController {
 
     private func positionCaptureToolbarOnActiveScreen(_ window: NSWindow) {
         let visibleFrame = activeScreen.visibleFrame
-        let frame = window.frame
-        let origin = NSPoint(
-            x: visibleFrame.midX - (frame.width / 2),
-            y: visibleFrame.maxY - frame.height - 18
+        let origin = Self.captureToolbarOrigin(
+            toolbarSize: window.frame.size,
+            visibleFrame: visibleFrame
         )
         window.setFrameOrigin(origin)
+    }
+
+    static func captureToolbarOrigin(
+        toolbarSize: NSSize,
+        visibleFrame: NSRect,
+        bottomMargin: CGFloat = 45
+    ) -> NSPoint {
+        NSPoint(
+            x: visibleFrame.midX - (toolbarSize.width / 2),
+            y: visibleFrame.minY + bottomMargin
+        )
+    }
+
+    private func observeAppWindowResize(_ window: NSWindow) {
+        if let appWindowResizeObserver {
+            NotificationCenter.default.removeObserver(appWindowResizeObserver)
+        }
+
+        appWindowResizeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: window,
+            queue: .main
+        ) { [weak self, weak window] _ in
+            Task { @MainActor in
+                guard let self, let window, self.appWindow === window else { return }
+                guard self.isCaptureToolbarWindow(window) else { return }
+                self.positionCaptureToolbarOnActiveScreen(window)
+            }
+        }
     }
 
     private var activeScreen: NSScreen {

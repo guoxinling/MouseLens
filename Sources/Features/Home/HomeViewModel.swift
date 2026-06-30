@@ -1,16 +1,23 @@
+import AppKit
 import Combine
 import Foundation
 
 @MainActor
 final class HomeViewModel: ObservableObject {
+    enum WindowTargetSelectionPolicy {
+        case preserveSelection
+        case preferCurrentWindow
+    }
+
     @Published var selectedCaptureTarget: CaptureTarget = .screen {
         didSet {
             if !isApplyingDefaults {
                 environment.preferencesStore.defaultCaptureTarget = selectedCaptureTarget
             }
-            guard selectedCaptureTarget == .window else { return }
-            Task { [weak self] in
-                await self?.refreshWindowTargets()
+            if selectedCaptureTarget == .window {
+                scheduleWindowTargetRefresh(delayNanoseconds: 0)
+            } else {
+                cancelScheduledWindowTargetRefresh(invalidateRequests: true)
             }
         }
     }
@@ -44,6 +51,9 @@ final class HomeViewModel: ObservableObject {
 
     private let environment: AppEnvironment
     private var countdownTask: Task<Void, Never>?
+    private var windowTargetRefreshTask: Task<Void, Never>?
+    private var windowTargetRefreshGeneration = 0
+    private var loadingWindowTargetRefreshGeneration: Int?
     private var isApplyingDefaults = false
     private var cancellables: Set<AnyCancellable> = []
 
@@ -74,6 +84,14 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    var isRecordingActionDisabled: Bool {
+        guard case .idle = recordingState else { return false }
+        return permissions.needsScreenRecordingRelaunch || Self.isWindowRecordingUnavailable(
+            captureTarget: selectedCaptureTarget,
+            selectedWindowTargetID: selectedWindowTargetID
+        )
+    }
+
     var captureConfigurationSummary: String {
         let audioParts = [
             includeMicrophone ? "Mic" : nil,
@@ -92,13 +110,14 @@ final class HomeViewModel: ObservableObject {
             return "Loading Windows"
         }
 
-        return selectedWindowTarget?.compactLabel ?? "Choose Window"
+        return selectedWindowTarget?.compactLabel ?? "No Window in This Space"
     }
 
     init(environment: AppEnvironment) {
         self.environment = environment
         applyPreferences()
         bindPreferences()
+        bindWorkspaceNotifications()
         refreshPermissions()
         loadRecentProjects()
 
@@ -110,6 +129,7 @@ final class HomeViewModel: ObservableObject {
 
     deinit {
         countdownTask?.cancel()
+        windowTargetRefreshTask?.cancel()
         environment.hotkeyManager.setToggleHandler(nil)
     }
 
@@ -142,11 +162,10 @@ final class HomeViewModel: ObservableObject {
         }
 
         if selectedCaptureTarget == .window {
-            if selectedWindowTargetID == nil || selectedWindowTarget == nil {
-                await refreshWindowTargets(preservingCurrentSelection: selectedWindowTargetID != nil)
-            }
+            cancelScheduledWindowTargetRefresh(invalidateRequests: false)
+            await refreshWindowTargets(policy: .preferCurrentWindow, showsLoadingState: false)
             guard selectedWindowTargetID != nil else {
-                statusMessage = "No recordable window is selected. Open a window, refresh Window mode, then record again."
+                statusMessage = "No Window in This Space. Switch to a Space with a recordable window, then try again."
                 return
             }
         }
@@ -273,36 +292,56 @@ final class HomeViewModel: ObservableObject {
         return project
     }
 
-    func refreshWindowTargets(preservingCurrentSelection: Bool = false) async {
+    func refreshWindowTargets(
+        policy: WindowTargetSelectionPolicy = .preferCurrentWindow,
+        showsLoadingState: Bool = true
+    ) async {
         guard recordingState == .idle, selectedCaptureTarget == .window else { return }
 
-        isRefreshingWindowTargets = true
-        defer { isRefreshingWindowTargets = false }
+        windowTargetRefreshGeneration += 1
+        let generation = windowTargetRefreshGeneration
+        if showsLoadingState {
+            loadingWindowTargetRefreshGeneration = generation
+            isRefreshingWindowTargets = true
+        }
+        defer {
+            if loadingWindowTargetRefreshGeneration == generation {
+                loadingWindowTargetRefreshGeneration = nil
+                isRefreshingWindowTargets = false
+            }
+        }
 
         let previousTargets = availableWindowTargets
         let previousTargetID = selectedWindowTargetID
 
         do {
             let targets = try await environment.screenRecorder.availableWindowTargets()
-            availableWindowTargets = targets
+            guard generation == windowTargetRefreshGeneration,
+                  Self.shouldAutoRefreshWindowTargets(
+                    captureTarget: selectedCaptureTarget,
+                    recordingState: recordingState
+                  ) else { return }
 
-            if let selectedWindowTargetID,
-               targets.contains(where: { $0.id == selectedWindowTargetID }) {
-                statusMessage = "Window target: \(selectedWindowTarget?.displayLabel ?? "Selected window")."
-            } else if preservingCurrentSelection, previousTargetID != nil {
-                availableWindowTargets = targets.isEmpty ? previousTargets : targets
-                selectedWindowTargetID = previousTargetID
-                statusMessage = "Window target preserved for recording."
-            } else {
-                selectedWindowTargetID = targets.first?.id
-                if let selectedWindowTarget {
-                    statusMessage = "Window target: \(selectedWindowTarget.displayLabel)."
-                } else {
-                    statusMessage = "No recordable windows found. Open a window, then refresh Window mode."
-                }
+            availableWindowTargets = targets
+            selectedWindowTargetID = Self.resolveWindowTargetID(
+                from: targets,
+                previousID: previousTargetID,
+                policy: policy
+            )
+
+            if let selectedWindowTarget, showsLoadingState {
+                statusMessage = "Window target: \(selectedWindowTarget.displayLabel)."
+            } else if selectedWindowTarget == nil {
+                statusMessage = "No Window in This Space. Switch to a Space with a recordable window."
             }
         } catch {
-            if preservingCurrentSelection, previousTargetID != nil {
+            guard generation == windowTargetRefreshGeneration,
+                  Self.shouldAutoRefreshWindowTargets(
+                    captureTarget: selectedCaptureTarget,
+                    recordingState: recordingState
+                  ) else { return }
+
+            if policy == .preserveSelection, previousTargetID != nil {
                 availableWindowTargets = previousTargets
                 selectedWindowTargetID = previousTargetID
             } else {
@@ -311,6 +350,10 @@ final class HomeViewModel: ObservableObject {
             }
             statusMessage = "Unable to list windows: \(error.localizedDescription)"
         }
+    }
+
+    func captureToolbarDidAppear() {
+        scheduleWindowTargetRefresh(delayNanoseconds: 0)
     }
 
     func selectWindowTarget(_ target: CaptureWindowOption) {
@@ -445,6 +488,76 @@ final class HomeViewModel: ObservableObject {
                 self.applyPreferences()
             }
             .store(in: &cancellables)
+    }
+
+    private func bindWorkspaceNotifications() {
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+            .merge(with: workspaceNotifications.publisher(for: NSWorkspace.didActivateApplicationNotification))
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleWindowTargetRefresh(delayNanoseconds: 300_000_000)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func scheduleWindowTargetRefresh(delayNanoseconds: UInt64) {
+        guard Self.shouldAutoRefreshWindowTargets(
+            captureTarget: selectedCaptureTarget,
+            recordingState: recordingState
+        ) else { return }
+
+        windowTargetRefreshTask?.cancel()
+        windowTargetRefreshTask = Task { [weak self] in
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshWindowTargets(
+                policy: .preferCurrentWindow,
+                showsLoadingState: false
+            )
+        }
+    }
+
+    private func cancelScheduledWindowTargetRefresh(invalidateRequests: Bool) {
+        windowTargetRefreshTask?.cancel()
+        windowTargetRefreshTask = nil
+        if invalidateRequests {
+            windowTargetRefreshGeneration += 1
+        }
+    }
+
+    static func resolveWindowTargetID(
+        from targets: [CaptureWindowOption],
+        previousID: UInt32?,
+        policy: WindowTargetSelectionPolicy
+    ) -> UInt32? {
+        guard !targets.isEmpty else { return nil }
+        if policy == .preserveSelection,
+           let previousID,
+           targets.contains(where: { $0.id == previousID }) {
+            return previousID
+        }
+        return targets.first?.id
+    }
+
+    static func shouldAutoRefreshWindowTargets(
+        captureTarget: CaptureTarget,
+        recordingState: RecordingState
+    ) -> Bool {
+        guard captureTarget == .window else { return false }
+        if case .idle = recordingState {
+            return true
+        }
+        return false
+    }
+
+    static func isWindowRecordingUnavailable(
+        captureTarget: CaptureTarget,
+        selectedWindowTargetID: UInt32?
+    ) -> Bool {
+        captureTarget == .window && selectedWindowTargetID == nil
     }
 
     private func normalize(events: [PointerEvent], for session: CaptureSession) -> [PointerEvent] {

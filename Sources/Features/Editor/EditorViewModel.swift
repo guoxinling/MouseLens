@@ -23,6 +23,8 @@ final class EditorViewModel: ObservableObject {
         didSet { handleStyleChange(updateExportPreset: true) }
     }
     @Published var exportPreset: ExportPreset = .standardLandscape
+    @Published private(set) var exportConfiguration = ExportConfiguration.recommended(for: .landscape)
+    @Published private(set) var isExportConfigurationModified = false
     @Published var exportState: ExportState = .idle
     @Published var exportURL: URL?
     @Published var showExportSheet = false
@@ -98,6 +100,8 @@ final class EditorViewModel: ObservableObject {
         trimStart = project.effectiveTrimRange.start
         trimEnd = project.effectiveTrimRange.end
         exportPreset = ExportPreset.defaultPreset(for: project.style.aspectRatio)
+        exportConfiguration = .recommended(for: project.style.aspectRatio)
+        isExportConfigurationModified = false
         exportState = .idle
         exportURL = nil
         showExportSheet = false
@@ -120,7 +124,11 @@ final class EditorViewModel: ObservableObject {
 
     func export() async {
         guard let project else { return }
-        guard let destinationURL = presentExportSavePanel(for: project, preset: exportPreset) else {
+        guard exportConfiguration.format.isAvailable else {
+            exportState = .failed("This export format is not available yet.")
+            return
+        }
+        guard let destinationURL = presentExportSavePanel(for: project, configuration: exportConfiguration) else {
             exportState = .idle
             return
         }
@@ -129,7 +137,7 @@ final class EditorViewModel: ObservableObject {
         do {
             let url = try await exportCoordinator.exportVideo(
                 for: project,
-                preset: exportPreset,
+                configuration: exportConfiguration,
                 destinationURL: destinationURL
             )
             exportURL = url
@@ -143,13 +151,19 @@ final class EditorViewModel: ObservableObject {
         }
     }
 
-    private func presentExportSavePanel(for project: RecordingProject, preset: ExportPreset) -> URL? {
+    private func presentExportSavePanel(
+        for project: RecordingProject,
+        configuration: ExportConfiguration
+    ) -> URL? {
         let panel = NSSavePanel()
         panel.title = "Export MP4"
         panel.message = "Choose where MouseLens should save the exported video."
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        panel.nameFieldStringValue = ExportCoordinator.exportFilename(for: project, preset: preset)
+        panel.nameFieldStringValue = ExportCoordinator.exportFilename(
+            for: project,
+            configuration: configuration
+        )
         panel.allowedContentTypes = [.mpeg4Movie]
         panel.directoryURL = defaultExportDirectoryURL()
 
@@ -160,6 +174,61 @@ final class EditorViewModel: ObservableObject {
         return url.pathExtension.lowercased() == "mp4"
             ? url
             : url.appendingPathExtension("mp4")
+    }
+
+    var exportButtonLabel: String {
+        switch exportConfiguration.format {
+        case .mp4: "Export MP4"
+        case .gif: "Export GIF"
+        }
+    }
+
+    var estimatedExportByteCount: Int64 {
+        let aspectRatio = project?.style.aspectRatio ?? selectedAspectRatio
+        let renderSize = exportConfiguration.renderSize(for: aspectRatio)
+        let videoBitRate = exportConfiguration.quality.averageBitRate(
+            renderSize: renderSize,
+            frameRate: exportConfiguration.frameRate
+        )
+        let audioBitRate = 192_000
+        let duration = max(project?.trimmedDuration ?? 0, 0)
+        return max(Int64((Double(videoBitRate + audioBitRate) * duration) / 8), 0)
+    }
+
+    var estimatedExportSizeLabel: String {
+        ByteCountFormatter.string(fromByteCount: estimatedExportByteCount, countStyle: .file)
+    }
+
+    func updateExportResolution(_ value: ExportResolution) {
+        updateExportConfiguration { $0.resolution = value }
+    }
+
+    func updateExportFrameRate(_ value: ExportFrameRate) {
+        updateExportConfiguration { $0.frameRate = value }
+    }
+
+    func updateExportQuality(_ value: ExportQuality) {
+        updateExportConfiguration { $0.quality = value }
+    }
+
+    func updateExportIncludesCursor(_ value: Bool) {
+        updateExportConfiguration { $0.includesCursor = value }
+    }
+
+    func updateExportIncludesClickFeedback(_ value: Bool) {
+        updateExportConfiguration { $0.includesClickFeedback = value }
+    }
+
+    func resetExportConfiguration() {
+        exportConfiguration = .recommended(for: selectedAspectRatio)
+        isExportConfigurationModified = false
+        exportState = .idle
+    }
+
+    private func updateExportConfiguration(_ change: (inout ExportConfiguration) -> Void) {
+        change(&exportConfiguration)
+        isExportConfigurationModified = exportConfiguration != .recommended(for: selectedAspectRatio)
+        exportState = .idle
     }
 
     private func defaultExportDirectoryURL() -> URL {

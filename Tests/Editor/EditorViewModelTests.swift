@@ -26,6 +26,55 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.cornerRadius, 10.35, accuracy: 0.0001)
     }
 
+    func testEditorStartsWithRecommendedExportConfiguration() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+
+        XCTAssertEqual(viewModel.exportConfiguration, .recommended(for: .landscape))
+        XCTAssertFalse(viewModel.isExportConfigurationModified)
+        XCTAssertEqual(viewModel.exportButtonLabel, "Export MP4")
+    }
+
+    func testEditingAndResettingExportConfiguration() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+        viewModel.updateExportResolution(.p720)
+        viewModel.updateExportFrameRate(.fps15)
+        viewModel.updateExportQuality(.small)
+        viewModel.updateExportIncludesCursor(false)
+        viewModel.updateExportIncludesClickFeedback(false)
+
+        XCTAssertTrue(viewModel.isExportConfigurationModified)
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p720)
+        XCTAssertEqual(viewModel.exportConfiguration.frameRate, .fps15)
+        XCTAssertEqual(viewModel.exportConfiguration.quality, .small)
+        XCTAssertFalse(viewModel.exportConfiguration.includesCursor)
+        XCTAssertFalse(viewModel.exportConfiguration.includesClickFeedback)
+
+        viewModel.resetExportConfiguration()
+
+        XCTAssertFalse(viewModel.isExportConfigurationModified)
+        XCTAssertEqual(viewModel.exportConfiguration, .recommended(for: .landscape))
+    }
+
+    func testExportEstimateUsesConfiguredBitrateAndTrimmedDuration() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+        let highEstimate = viewModel.estimatedExportByteCount
+        viewModel.updateExportResolution(.p480)
+        viewModel.updateExportFrameRate(.fps15)
+        viewModel.updateExportQuality(.small)
+
+        XCTAssertGreaterThan(highEstimate, viewModel.estimatedExportByteCount)
+        XCTAssertGreaterThan(viewModel.estimatedExportByteCount, 0)
+    }
+
     func testChangingAspectRatioUpdatesDraftAndExportPreset() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)

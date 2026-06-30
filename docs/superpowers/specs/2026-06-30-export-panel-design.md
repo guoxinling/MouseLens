@@ -18,19 +18,20 @@ The panel keeps the current inspector width.
 1. Header
    - Back control and `Export` title.
    - Export readiness state.
-2. Mode control
-   - `Presets` selected by default.
-   - `Custom` for detailed settings.
-3. Preset cards
+2. Format cards
    - `MP4` with `H.264` and output resolution summary.
    - `GIF` with short-clip guidance; disabled in the first UI-only iteration if encoding is not implemented.
-4. Common controls
+   - Selecting a format loads its recommended export settings.
+3. Editable settings
    - Resolution.
    - Frame rate.
    - Quality.
    - Include Cursor.
    - Include Click Feedback.
-5. Fixed footer
+   - Recommended values remain directly editable; there is no separate Custom mode.
+   - Changing any value marks the configuration as `Modified`.
+   - `Reset to Recommended` restores the selected format's defaults.
+4. Fixed footer
    - Estimated output size when available.
    - Primary button whose label matches the selected format.
 
@@ -39,9 +40,10 @@ The panel keeps the current inspector width.
 - Match the existing dark MouseLens editor and 8px-or-less control radius.
 - Use compact format cards, restrained borders, and a single blue selection state.
 - Keep the primary export button visually dominant.
+- Keep the recommended/modified state quiet and secondary to the export action.
 - Do not show a permanent Refresh control.
 - Show `Retry Preview` only when preview rendering has failed.
-- Avoid nested cards; the export inspector is one full-height panel with individually framed preset options.
+- Avoid nested cards; the export inspector is one full-height panel with individually framed format options.
 
 ## States
 
@@ -49,11 +51,11 @@ The panel keeps the current inspector width.
 - Exporting: controls disabled with progress in the primary action area.
 - Failed: inline error and retry export action.
 - Preview failed: separate `Retry Preview` action in the header status area.
-- GIF unavailable: GIF preset remains visible but clearly disabled until the encoder lands.
+- GIF unavailable: the GIF format remains visible but clearly disabled until the encoder lands.
 
 ## Mockup Scope
 
-The HTML mockup will show the complete editor with the Export inspector open. It will support switching between Presets and Custom, selecting MP4 or GIF, and changing representative controls. It is a visual prototype only and will not export media.
+The HTML mockup will show the complete editor with the Export inspector open. It will support selecting MP4 or GIF, editing recommended settings, showing the modified state, and resetting to recommended values. It is a visual prototype only and will not export media.
 
 ## Implementation Boundary
 

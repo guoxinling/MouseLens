@@ -27,3 +27,6 @@ __pycache__/
 # Local debug probes and transient investigation artifacts
 .swift-module-cache/
 .tmp_*
+
+# Local visual brainstorming sessions
+.superpowers/

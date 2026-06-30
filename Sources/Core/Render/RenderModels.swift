@@ -158,6 +158,7 @@ enum ExportPreset: String, CaseIterable {
 }
 
 enum VideoRendererError: LocalizedError {
+    case unsupportedExportFormat
     case missingSourceVideo
     case legacySourceRequiresRecapture
     case unableToCreateWriter
@@ -169,6 +170,8 @@ enum VideoRendererError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .unsupportedExportFormat:
+            "This export format is not available yet."
         case .missingSourceVideo:
             "MouseLens could not find the raw recording for export."
         case .legacySourceRequiresRecapture:
@@ -692,7 +695,6 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let previewLongestSide: CGFloat = 1280
     private let previewVideoLongestSide: CGFloat = 960
-    private let exportFPS: Int32 = 30
     private let sourceFrameSeekTolerance = CMTime(value: 1, timescale: 12)
     private let renderColorSpace = CGColorSpaceCreateDeviceRGB()
     private lazy var cursorTemplateImage: CIImage = makeCursorTemplateImage()
@@ -706,6 +708,46 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             for: project,
             sourceURL: sourceURL,
             renderSize: preset.renderSize,
+            destinationURL: destinationURL
+        )
+    }
+
+    func renderVideo(
+        for project: RecordingProject,
+        configuration: ExportConfiguration,
+        destinationURL: URL
+    ) async throws -> URL {
+        guard configuration.format == .mp4 else {
+            throw VideoRendererError.unsupportedExportFormat
+        }
+
+        let renderSize = configuration.renderSize(for: project.style.aspectRatio)
+        let frameRate = configuration.frameRate.rawValue
+        let averageBitRate = configuration.quality.averageBitRate(
+            renderSize: renderSize,
+            frameRate: configuration.frameRate
+        )
+
+        guard let sourceURL = project.sourceVideoURL, FileManager.default.fileExists(atPath: sourceURL.path) else {
+            return try await renderDebugVideo(
+                for: project,
+                renderSize: renderSize,
+                frameRate: frameRate,
+                averageBitRate: averageBitRate,
+                includesCursor: configuration.includesCursor,
+                includesClickFeedback: configuration.includesClickFeedback,
+                destinationURL: destinationURL
+            )
+        }
+
+        return try await renderSourceVideo(
+            for: project,
+            sourceURL: sourceURL,
+            renderSize: renderSize,
+            frameRate: frameRate,
+            averageBitRate: averageBitRate,
+            includesCursor: configuration.includesCursor,
+            includesClickFeedback: configuration.includesClickFeedback,
             destinationURL: destinationURL
         )
     }
@@ -784,7 +826,15 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         try await renderDebugVideo(for: project, renderSize: preset.renderSize, destinationURL: destinationURL)
     }
 
-    private func renderDebugVideo(for project: RecordingProject, renderSize: CGSize, destinationURL: URL) async throws -> URL {
+    private func renderDebugVideo(
+        for project: RecordingProject,
+        renderSize: CGSize,
+        frameRate: Int32 = 30,
+        averageBitRate: Int = 8_000_000,
+        includesCursor: Bool = true,
+        includesClickFeedback: Bool = true,
+        destinationURL: URL
+    ) async throws -> URL {
         let fm = FileManager.default
         if fm.fileExists(atPath: destinationURL.path) {
             try fm.removeItem(at: destinationURL)
@@ -795,7 +845,11 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let outputSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: size.width,
-            AVVideoHeightKey: size.height
+            AVVideoHeightKey: size.height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: averageBitRate,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            ]
         ]
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
@@ -820,7 +874,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
-        let fps: Int32 = 30
+        let fps = frameRate
         let clipSegments = project.effectiveClipSegments
         let duration = max(totalDuration(of: clipSegments), 1.0 / Double(fps))
         let totalFrames = max(Int(ceil(duration * Double(fps))), 1)
@@ -853,6 +907,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                         snapshot: snapshot,
                         pointerSnapshot: pointerSnapshot,
                         project: project,
+                        includesCursor: includesCursor,
+                        includesClickFeedback: includesClickFeedback,
                         timestamp: timestamp
                     )
                     adaptor.append(buffer, withPresentationTime: presentationTime)
@@ -879,6 +935,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         for project: RecordingProject,
         sourceURL: URL,
         renderSize: CGSize,
+        frameRate: Int32 = 30,
+        averageBitRate: Int = 8_000_000,
+        includesCursor: Bool = true,
+        includesClickFeedback: Bool = true,
         destinationURL: URL
     ) async throws -> URL {
         let fm = FileManager.default
@@ -900,6 +960,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 sourceAsset: asset,
                 preparedAssets: preparedAssets,
                 renderSize: renderSize,
+                frameRate: frameRate,
+                averageBitRate: averageBitRate,
+                includesCursor: includesCursor,
+                includesClickFeedback: includesClickFeedback,
                 destinationURL: temporaryVideoURL
             )
         } catch {
@@ -925,6 +989,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         sourceAsset: AVURLAsset,
         preparedAssets: PreparedRenderAssets,
         renderSize: CGSize,
+        frameRate: Int32,
+        averageBitRate: Int,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
         destinationURL: URL
     ) async throws -> URL {
         let fm = FileManager.default
@@ -940,7 +1008,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             AVVideoWidthKey: renderSize.width,
             AVVideoHeightKey: renderSize.height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 8_000_000,
+                AVVideoAverageBitRateKey: averageBitRate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
             ]
         ]
@@ -970,9 +1038,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let assetDuration = try await sourceAsset.load(.duration)
         let sourceDuration = max(CMTimeGetSeconds(assetDuration), 0)
         let clipSegments = RecordingProject.normalizedClipSegments(project.effectiveClipSegments, duration: sourceDuration)
-        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(exportFPS))
-        let totalFrames = max(Int(ceil(safeDuration * Double(exportFPS))), 1)
-        let frameDuration = CMTime(value: 1, timescale: exportFPS)
+        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(frameRate))
+        let totalFrames = max(Int(ceil(safeDuration * Double(frameRate))), 1)
+        let frameDuration = CMTime(value: 1, timescale: frameRate)
 
         let generator = AVAssetImageGenerator(asset: sourceAsset)
         generator.appliesPreferredTrackTransform = true
@@ -991,7 +1059,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             }
 
             let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
-            let outputTimestamp = min(Double(frameIndex) / Double(exportFPS), max(safeDuration - (1.0 / Double(exportFPS)), 0))
+            let outputTimestamp = min(
+                Double(frameIndex) / Double(frameRate),
+                max(safeDuration - (1.0 / Double(frameRate)), 0)
+            )
             let seconds = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
             let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
             let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
@@ -1011,7 +1082,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     snapshot: snapshot,
                     pointerSnapshot: pointerSnapshot,
                     project: project,
-                    preparedAssets: preparedAssets
+                    preparedAssets: preparedAssets,
+                    includesCursor: includesCursor,
+                    includesClickFeedback: includesClickFeedback
                 )
 
                 guard let buffer = makePixelBuffer(from: adaptor, size: renderSize) else {
@@ -1264,7 +1337,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         snapshot: FrameSnapshot,
         pointerSnapshot: PointerSnapshot?,
         project: RecordingProject,
-        preparedAssets: PreparedRenderAssets
+        preparedAssets: PreparedRenderAssets,
+        includesCursor: Bool = true,
+        includesClickFeedback: Bool = true
     ) -> CIImage {
         let presentation = cropPlanner.presentation(
             for: sourceImage.extent,
@@ -1314,6 +1389,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             to: maskedContent,
             snapshot: snapshot,
             reconstructsCursor: project.reconstructsCursor,
+            includesClickFeedback: includesClickFeedback,
             layout: preparedAssets.layout,
             sourceExtent: sourceImage.extent,
             cropRect: cropRect,
@@ -1324,6 +1400,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             to: emphasized,
             pointerSnapshot: pointerSnapshot,
             reconstructsCursor: project.reconstructsCursor,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback,
             layout: preparedAssets.layout,
             sourceExtent: sourceImage.extent,
             cropRect: cropRect,
@@ -1480,12 +1558,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         to image: CIImage,
         snapshot: FrameSnapshot,
         reconstructsCursor: Bool,
+        includesClickFeedback: Bool,
         layout: RenderLayout,
         sourceExtent: CGRect,
         cropRect: CGRect,
         displayRect: CGRect
     ) -> CIImage {
-        guard reconstructsCursor == false else {
+        guard includesClickFeedback, reconstructsCursor == false else {
             return image
         }
 
@@ -1551,6 +1630,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         to image: CIImage,
         pointerSnapshot: PointerSnapshot?,
         reconstructsCursor: Bool,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
         layout: RenderLayout,
         sourceExtent: CGRect,
         cropRect: CGRect,
@@ -1568,7 +1649,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let ciPoint = coreImagePoint(fromTopOriginPoint: point, in: layout.fullRect)
 
         var layeredImage = image
-        if pointerSnapshot.isClickActive, let clickLocation = pointerSnapshot.clickLocation {
+        if includesClickFeedback, pointerSnapshot.isClickActive, let clickLocation = pointerSnapshot.clickLocation {
             let clickPoint = cropPlanner.mappedContentPoint(
                 for: clickLocation,
                 in: sourceExtent,
@@ -1584,6 +1665,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 layout: layout
             )
         }
+
+        guard includesCursor else { return layeredImage }
 
         let baseScale = (min(layout.contentRect.width, layout.contentRect.height) / 1050).clamped(to: 0.78...1.08)
         let scale = baseScale * (1 + (pointerSnapshot.clickProgress * 0.05))
@@ -1671,6 +1754,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         snapshot: FrameSnapshot,
         pointerSnapshot: PointerSnapshot?,
         project: RecordingProject,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
         timestamp: TimeInterval
     ) {
         CVPixelBufferLockBaseAddress(buffer, [])
@@ -1722,27 +1807,31 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             y: contentRect.minY + (focusSource.y * contentRect.height)
         )
 
-        let ringRadius = 42 * snapshot.zoom
-        context.setStrokeColor(CGColor(red: 0.10, green: 0.42, blue: 0.96, alpha: 0.24))
-        context.setLineWidth(10)
-        context.strokeEllipse(in: CGRect(
-            x: focusPoint.x - ringRadius,
-            y: focusPoint.y - ringRadius,
-            width: ringRadius * 2,
-            height: ringRadius * 2
-        ))
+        if includesClickFeedback {
+            let ringRadius = 42 * snapshot.zoom
+            context.setStrokeColor(CGColor(red: 0.10, green: 0.42, blue: 0.96, alpha: 0.24))
+            context.setLineWidth(10)
+            context.strokeEllipse(in: CGRect(
+                x: focusPoint.x - ringRadius,
+                y: focusPoint.y - ringRadius,
+                width: ringRadius * 2,
+                height: ringRadius * 2
+            ))
 
-        context.setFillColor(CGColor(red: 0.10, green: 0.42, blue: 0.96, alpha: 1.0))
-        context.fillEllipse(in: CGRect(x: focusPoint.x - 10, y: focusPoint.y - 10, width: 20, height: 20))
+            context.setFillColor(CGColor(gray: 0.15, alpha: 0.08))
+            let pulse = 14 + (sin(timestamp * 6) * 6)
+            context.fillEllipse(in: CGRect(
+                x: focusPoint.x - 10 - pulse,
+                y: focusPoint.y - 10 - pulse,
+                width: 20 + (pulse * 2),
+                height: 20 + (pulse * 2)
+            ))
+        }
 
-        context.setFillColor(CGColor(gray: 0.15, alpha: 0.08))
-        let pulse = 14 + (sin(timestamp * 6) * 6)
-        context.fillEllipse(in: CGRect(
-            x: focusPoint.x - 10 - pulse,
-            y: focusPoint.y - 10 - pulse,
-            width: 20 + (pulse * 2),
-            height: 20 + (pulse * 2)
-        ))
+        if includesCursor {
+            context.setFillColor(CGColor(red: 0.10, green: 0.42, blue: 0.96, alpha: 1.0))
+            context.fillEllipse(in: CGRect(x: focusPoint.x - 10, y: focusPoint.y - 10, width: 20, height: 20))
+        }
     }
 
     private func drawDebugBackground(in context: CGContext, size: CGSize, style: ProjectBackgroundStyle) {
@@ -1829,6 +1918,37 @@ final class ExportCoordinator {
         return try moveExportedVideo(from: renderedURL, to: destinationURL)
     }
 
+    func exportVideo(for project: RecordingProject, configuration: ExportConfiguration) async throws -> URL {
+        let exportDirectory = projectStore.exportDirectory(for: project)
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true, attributes: nil)
+        let filename = Self.exportFilename(for: project, configuration: configuration)
+        let destinationURL = exportDirectory.appendingPathComponent(filename)
+        return try await exportVideo(for: project, configuration: configuration, destinationURL: destinationURL)
+    }
+
+    func exportVideo(
+        for project: RecordingProject,
+        configuration: ExportConfiguration,
+        destinationURL: URL
+    ) async throws -> URL {
+        let workingDirectory = projectStore.exportDirectory(for: project)
+        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true, attributes: nil)
+
+        let workingURL = workingDirectory.appendingPathComponent("working-\(UUID().uuidString).mp4")
+        defer {
+            if workingURL.standardizedFileURL != destinationURL.standardizedFileURL {
+                try? FileManager.default.removeItem(at: workingURL)
+            }
+        }
+
+        let renderedURL = try await renderer.renderVideo(
+            for: project,
+            configuration: configuration,
+            destinationURL: workingURL
+        )
+        return try moveExportedVideo(from: renderedURL, to: destinationURL)
+    }
+
     private func moveExportedVideo(from sourceURL: URL, to destinationURL: URL) throws -> URL {
         let fileManager = FileManager.default
         guard sourceURL.standardizedFileURL != destinationURL.standardizedFileURL else {
@@ -1854,6 +1974,14 @@ final class ExportCoordinator {
     }
 
     static func exportFilename(for project: RecordingProject, preset: ExportPreset) -> String {
+        "\(exportFilenameStem(for: project))-\(preset.rawValue).mp4"
+    }
+
+    static func exportFilename(for project: RecordingProject, configuration: ExportConfiguration) -> String {
+        "\(exportFilenameStem(for: project))-\(configuration.format.rawValue)-\(configuration.resolution.rawValue).mp4"
+    }
+
+    private static func exportFilenameStem(for project: RecordingProject) -> String {
         let stamp = project.createdAt.formatted(
             .dateTime
                 .year()
@@ -1866,7 +1994,7 @@ final class ExportCoordinator {
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .replacingOccurrences(of: " ", with: "_")
-        return "\(project.name.filenameSlug)-\(normalizedStamp)-\(preset.rawValue).mp4"
+        return "\(project.name.filenameSlug)-\(normalizedStamp)"
     }
 }
 

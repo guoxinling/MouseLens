@@ -75,16 +75,16 @@ MouseLens 1.1 ships with eight built-in presets.
 ### Wallpaper-Style Image Presets
 
 1. `Soft Glass`
-   - Abstract glass-like highlights and soft reflection layers
+   - Abstract glass-like highlights with restrained layered reflections
    - Serves as the strongest product-hero wallpaper
 
-2. `Paper Stone`
-   - Matte paper or stone-inspired neutral texture
-   - Serves professional and low-distraction use cases
+2. `Tidal Glow`
+   - Bright blue-green abstract light depth with a small warm light accent
+   - Serves as the brighter premium wallpaper that adds energy without obvious texture
 
-3. `Luminous Fabric`
-   - Abstract soft-material light flow
-   - Serves visually richer showcase exports
+3. `Luminous Drift`
+   - Clean abstract luminous flow with soft atmosphere and minimal visible texture
+   - Serves visually richer showcase exports without distracting material detail
 
 4. `Horizon Glow`
    - Abstract spatial light depth with distant horizon-like staging
@@ -111,16 +111,16 @@ These should create the strongest first impression in social and store-facing vi
 ### Dark Recording Presets
 
 - `Midnight Pulse`
-- `Paper Stone`
+- `Horizon Glow`
 
 These should remain stable for dark windows, code editors, and terminal-heavy recordings.
 
-### Personality / Texture Presets
+### Atmospheric Accent Presets
 
-- `Luminous Fabric`
-- `Horizon Glow`
+- `Tidal Glow`
+- `Luminous Drift`
 
-These add variety without becoming novelty backgrounds.
+These add variety, motion, and visual lift without becoming novelty backgrounds.
 
 ## Visual Rules
 
@@ -188,7 +188,8 @@ Should avoid:
 Should include:
 
 - Abstract reflective softness
-- Layered highlight structure
+- Light glass layering
+- Controlled highlight structure
 - Premium product-render feeling
 
 Should avoid:
@@ -197,33 +198,37 @@ Should avoid:
 - Hard refraction complexity
 - Bright hotspots that compete with the recording window
 
-### `Paper Stone`
+### `Tidal Glow`
 
 Should include:
 
-- Fine matte material impression
-- Neutral texture
-- Quiet physicality
+- Blue-green luminous depth
+- A small amount of warm accent light
+- Clean abstract spatial layering
+- Bright but premium energy
 
 Should avoid:
 
-- Heavy texture frequency
-- Dirty grain
-- Interior design or decor styling
+- Grey-dominant mood
+- Visible material texture
+- Scenic or photographic interpretation
+- Busy light noise
 
-### `Luminous Fabric`
+### `Luminous Drift`
 
 Should include:
 
 - Soft continuous light flow
-- Abstract fabric or mist behavior
-- Slightly expressive form language
+- Airy abstract atmosphere
+- Slightly expressive but still clean composition
+- Very low visible texture
 
 Should avoid:
 
-- Literal cloth folds
-- Fashion-ad styling
-- Overly tactile realism
+- Literal fabric texture
+- Patterning
+- Tactile realism
+- Any surface detail that pulls attention from the recording window
 
 ### `Horizon Glow`
 
@@ -248,6 +253,7 @@ All eight presets must avoid:
 - Recognizable subject matter
 - Repeating patterns
 - High-frequency texture
+- Material or photographic detail that competes with the content frame
 - Strong purple-led palettes
 - Heavy black corner vignettes
 - Local highlight noise that makes cursor or click feedback hard to read

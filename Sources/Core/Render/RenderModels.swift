@@ -253,6 +253,18 @@ protocol ProjectPreviewRendering {
     ) async throws -> URL
 }
 
+enum BackgroundRenderResolver {
+    static func gradientColors(for preset: BackgroundPreset) -> [CGColor] {
+        preset.gradient?.colors.map {
+            CGColor(red: $0.red, green: $0.green, blue: $0.blue, alpha: $0.alpha)
+        } ?? []
+    }
+
+    static func wallpaperAssetName(for preset: BackgroundPreset) -> String? {
+        preset.wallpaper?.assetName
+    }
+}
+
 struct PointerTimeline {
     private let clickHighlightDuration: TimeInterval = 0.26
     private let smoothingWindow: TimeInterval = 0.13
@@ -1323,7 +1335,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             layout: layout,
             backgroundImage: makeBackgroundImage(
                 size: layout.renderSize,
-                style: style.background,
+                preset: style.backgroundPreset,
                 contentRect: layout.contentRect,
                 cornerRadius: style.cornerRadius,
                 shadowRadius: style.shadowRadius
@@ -1426,7 +1438,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
     private func makeBackgroundImage(
         size: CGSize,
-        style: ProjectBackgroundStyle,
+        preset: BackgroundPreset,
         contentRect: CGRect,
         cornerRadius: Double = 26,
         shadowRadius: Double = 30
@@ -1449,57 +1461,16 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             return CIImage(color: .white).cropped(to: CGRect(origin: .zero, size: size))
         }
 
-        let colors: [CGColor]
-        switch style {
-        case .aurora:
-            colors = [
-                CGColor(red: 0.88, green: 0.95, blue: 1.0, alpha: 1),
-                CGColor(red: 0.86, green: 0.98, blue: 0.90, alpha: 1),
-                CGColor(red: 0.80, green: 0.88, blue: 1.0, alpha: 1)
-            ]
-        case .graphite:
-            colors = [
-                CGColor(red: 0.15, green: 0.17, blue: 0.24, alpha: 1),
-                CGColor(red: 0.22, green: 0.24, blue: 0.34, alpha: 1),
-                CGColor(red: 0.16, green: 0.21, blue: 0.29, alpha: 1)
-            ]
-        case .sunrise:
-            colors = [
-                CGColor(red: 1.0, green: 0.93, blue: 0.82, alpha: 1),
-                CGColor(red: 1.0, green: 0.83, blue: 0.78, alpha: 1),
-                CGColor(red: 0.99, green: 0.88, blue: 0.95, alpha: 1)
-            ]
-        case .ocean:
-            colors = [
-                CGColor(red: 0.72, green: 0.92, blue: 1.0, alpha: 1),
-                CGColor(red: 0.48, green: 0.72, blue: 0.98, alpha: 1),
-                CGColor(red: 0.18, green: 0.34, blue: 0.72, alpha: 1)
-            ]
-        case .plum:
-            colors = [
-                CGColor(red: 0.95, green: 0.84, blue: 1.0, alpha: 1),
-                CGColor(red: 0.68, green: 0.56, blue: 0.94, alpha: 1),
-                CGColor(red: 0.30, green: 0.20, blue: 0.48, alpha: 1)
-            ]
-        case .moss:
-            colors = [
-                CGColor(red: 0.88, green: 0.96, blue: 0.78, alpha: 1),
-                CGColor(red: 0.62, green: 0.76, blue: 0.52, alpha: 1),
-                CGColor(red: 0.24, green: 0.38, blue: 0.30, alpha: 1)
-            ]
-        case .paper:
-            colors = [
-                CGColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1),
-                CGColor(red: 0.90, green: 0.91, blue: 0.92, alpha: 1),
-                CGColor(red: 0.78, green: 0.84, blue: 0.88, alpha: 1)
-            ]
-        case .midnight:
-            colors = [
-                CGColor(red: 0.05, green: 0.06, blue: 0.10, alpha: 1),
-                CGColor(red: 0.09, green: 0.12, blue: 0.22, alpha: 1),
-                CGColor(red: 0.14, green: 0.20, blue: 0.35, alpha: 1)
-            ]
+        if let assetName = BackgroundRenderResolver.wallpaperAssetName(for: preset),
+           let image = NSImage(named: assetName),
+           let tiff = image.tiffRepresentation,
+           let ciImage = CIImage(data: tiff) {
+            return ciImage
+                .transformed(by: wallpaperTransform(for: ciImage.extent.size, canvasSize: size))
+                .cropped(to: CGRect(origin: .zero, size: size))
         }
+
+        let colors = BackgroundRenderResolver.gradientColors(for: preset)
 
         if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0, 0.55, 1]) {
             context.drawLinearGradient(
@@ -1514,6 +1485,17 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             return CIImage(color: .white).cropped(to: CGRect(origin: .zero, size: size))
         }
         return CIImage(cgImage: image)
+    }
+
+    private func wallpaperTransform(for sourceSize: CGSize, canvasSize: CGSize) -> CGAffineTransform {
+        let scale = max(canvasSize.width / sourceSize.width, canvasSize.height / sourceSize.height)
+        let scaledSize = CGSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        let origin = CGPoint(
+            x: (canvasSize.width - scaledSize.width) / 2,
+            y: (canvasSize.height - scaledSize.height) / 2
+        )
+
+        return CGAffineTransform(translationX: origin.x, y: origin.y).scaledBy(x: scale, y: scale)
     }
 
     private func makeRoundedMaskImage(size: CGSize, contentRect: CGRect, cornerRadius: Double) -> CIImage {
@@ -1837,7 +1819,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private func drawDebugBackground(in context: CGContext, size: CGSize, style: ProjectBackgroundStyle) {
         let background = makeBackgroundImage(
             size: size,
-            style: style,
+            preset: BackgroundPresetCatalog.preset(
+                id: BackgroundPresetCatalog.legacyPresetID(for: style)
+            ),
             contentRect: CGRect(origin: .zero, size: size)
         )
         ciContext.draw(background, in: CGRect(origin: .zero, size: size), from: CGRect(origin: .zero, size: size))

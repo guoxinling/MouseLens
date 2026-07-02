@@ -71,7 +71,7 @@ struct PreviewCanvasView: View {
         let showsLoadingOverlay = shouldShowLoadingOverlay
 
         return ZStack {
-            project.style.background.gradient
+            BackgroundPreviewFill(preset: project.style.backgroundPreset)
                 .opacity(0.88)
 
             if usesLiveStylePlayback, let activePlaybackURL {
@@ -158,7 +158,7 @@ struct PreviewCanvasView: View {
             let cornerRadius = max(project.style.cornerRadius, 0)
 
             ZStack {
-                project.style.background.gradient
+                BackgroundPreviewFill(preset: project.style.backgroundPreset)
 
                 ZStack(alignment: .topLeading) {
                     PreviewVideoPlayerView(
@@ -254,7 +254,7 @@ struct PreviewCanvasView: View {
 
     private func fallbackPreview(in size: CGSize) -> some View {
         ZStack {
-            project.style.background.gradient
+            BackgroundPreviewFill(preset: project.style.backgroundPreset)
 
             RoundedRectangle(cornerRadius: project.style.cornerRadius, style: .continuous)
                 .fill(Color.white.opacity(0.92))

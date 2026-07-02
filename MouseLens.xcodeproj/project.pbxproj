@@ -30,6 +30,7 @@
 		766EAC02F8C9B6303582951C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CF8D3CF7C916871FD04688 /* Assets.xcassets */; };
 		7ADBA69F83A9751B5366274C /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABA3DFA892793AC5E2A8B05 /* HomeView.swift */; };
 		83108CE3CDEE77D84EFF625F /* ExportPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */; };
+		83D3212D22536C20807A568A /* BackgroundRenderResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835A098CE0E74CA0BA88B263 /* BackgroundRenderResolverTests.swift */; };
 		840987137B9ACEDFC5C4FD7D /* RenderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9292717184450E66935639A4 /* RenderModels.swift */; };
 		88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641047913EE520DF81D67DE0 /* HomeViewModelWindowTargetTests.swift */; };
 		8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */; };
@@ -39,6 +40,7 @@
 		B1E4614D6011123A87634B30 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */; };
 		B2864C03D2FD058647EDA2B9 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490A410508B7A8D23900CB7E /* ExportSheetView.swift */; };
 		B89E5847D9260FDB1F0F9B67 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB2CDB03EC25F552570524D /* AppPreferencesStoreTests.swift */; };
+		BD43FE26F4837C5686639868 /* BackgroundPreviewStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8E49913C7789B1D0CC5D68E /* BackgroundPreviewStyle.swift */; };
 		CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6004F526659EF95F3FF4AE36 /* PermissionsViewModel.swift */; };
 		D58C64FA34281F91A22755D4 /* SettingRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DD250147D43817C9826F742 /* SettingRow.swift */; };
 		E177C764DADC0CDF48660CC7 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459C8CEFCF22A3BA48C654F8 /* SystemServices.swift */; };
@@ -86,6 +88,7 @@
 		7FC2DDFA948023BCA52EAC23 /* MetricSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricSlider.swift; sourceTree = "<group>"; };
 		80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingHUDView.swift; sourceTree = "<group>"; };
 		81318E147711A2C2F2CE4B4F /* RecordingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingState.swift; sourceTree = "<group>"; };
+		835A098CE0E74CA0BA88B263 /* BackgroundRenderResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRenderResolverTests.swift; sourceTree = "<group>"; };
 		8AD12DBA90338B67660F8A78 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		8DD250147D43817C9826F742 /* SettingRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingRow.swift; sourceTree = "<group>"; };
 		9292717184450E66935639A4 /* RenderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderModels.swift; sourceTree = "<group>"; };
@@ -98,6 +101,7 @@
 		CABA3DFA892793AC5E2A8B05 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		CE6DF292708123151C858EE1 /* MouseLensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouseLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D92E933D7DB3407EA9D77750 /* ProjectModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
+		D8E49913C7789B1D0CC5D68E /* BackgroundPreviewStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPreviewStyle.swift; sourceTree = "<group>"; };
 		DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStoreTests.swift; sourceTree = "<group>"; };
 		E43C0583E25B59D88E9C5A8D /* MouseLens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MouseLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EDE6630189503791E3E7621D /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModelTests.swift; sourceTree = "<group>"; };
@@ -246,6 +250,7 @@
 		81D10DB27DF25B10A419B877 /* DesignSystem */ = {
 			isa = PBXGroup;
 			children = (
+				D8E49913C7789B1D0CC5D68E /* BackgroundPreviewStyle.swift */,
 				5507A3B2A37F44792C466A1F /* AppTheme.swift */,
 				00C09AC13696FD241396E188 /* Controls */,
 			);
@@ -367,6 +372,7 @@
 		E094F1D4F3920C143A5C02D2 /* Render */ = {
 			isa = PBXGroup;
 			children = (
+				835A098CE0E74CA0BA88B263 /* BackgroundRenderResolverTests.swift */,
 				17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */,
 				21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */,
 				B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */,
@@ -491,6 +497,7 @@
 				8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */,
 				B89E5847D9260FDB1F0F9B67 /* AppPreferencesStoreTests.swift in Sources */,
 				E8FFF48F52F6ABFA901F9F01 /* AppWindowControllerTests.swift in Sources */,
+				83D3212D22536C20807A568A /* BackgroundRenderResolverTests.swift in Sources */,
 				F3DA86BB86CB67C5BFE2AAAF /* CameraPlanEngineTests.swift in Sources */,
 				6F49A6350B44E5F2413BE93A /* EditorViewModelTests.swift in Sources */,
 				097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */,
@@ -511,6 +518,7 @@
 				32F023939D47F1EBDA472F23 /* AppEnvironment.swift in Sources */,
 				0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */,
 				54F353E4865D246A39709A94 /* AppTheme.swift in Sources */,
+				BD43FE26F4837C5686639868 /* BackgroundPreviewStyle.swift in Sources */,
 				A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */,
 				744FF6CFC391C6F193F62D3A /* CaptureModels.swift in Sources */,
 				45FCAA7F760C14E8FA80CB80 /* Comparable+Clamp.swift in Sources */,

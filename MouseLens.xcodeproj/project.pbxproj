@@ -11,6 +11,7 @@
 		097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */; };
 		0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */; };
 		118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92E933D7DB3407EA9D77750 /* ProjectModels.swift */; };
+		128C0B4FD6BE493B86DB1A14 /* BackgroundPresetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A85625F946481AA95CB2DE /* BackgroundPresetCatalog.swift */; };
 		175F7434233F0509C9554848 /* RecordingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81318E147711A2C2F2CE4B4F /* RecordingState.swift */; };
 		1A9D192D2241014830F7D2C5 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A617C80326E0367CD783A13F /* EditorView.swift */; };
 		26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */; };
@@ -33,6 +34,7 @@
 		88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641047913EE520DF81D67DE0 /* HomeViewModelWindowTargetTests.swift */; };
 		8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */; };
 		99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */; };
+		A37BCB83BFB445C79739C4D7 /* BackgroundPresetCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A1AFA2E1E64F1C9B5A4D52 /* BackgroundPresetCatalogTests.swift */; };
 		A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E212BAF15684F714399474C /* CameraPlanning.swift */; };
 		B1E4614D6011123A87634B30 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B42AD18AEC0CE7C81C0C28F /* HomeViewModel.swift */; };
 		B2864C03D2FD058647EDA2B9 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490A410508B7A8D23900CB7E /* ExportSheetView.swift */; };
@@ -73,6 +75,7 @@
 		459C8CEFCF22A3BA48C654F8 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
 		490A410508B7A8D23900CB7E /* ExportSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheetView.swift; sourceTree = "<group>"; };
 		4E212BAF15684F714399474C /* CameraPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanning.swift; sourceTree = "<group>"; };
+		51A85625F946481AA95CB2DE /* BackgroundPresetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPresetCatalog.swift; sourceTree = "<group>"; };
 		5507A3B2A37F44792C466A1F /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		57C447F994700574E687752A /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceCropPlannerTests.swift; sourceTree = "<group>"; };
@@ -90,6 +93,7 @@
 		A617C80326E0367CD783A13F /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		A8C600B02748D9ED6E654808 /* PermissionGateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionGateView.swift; sourceTree = "<group>"; };
 		B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportPresetTests.swift; sourceTree = "<group>"; };
+		C2A1AFA2E1E64F1C9B5A4D52 /* BackgroundPresetCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundPresetCatalogTests.swift; sourceTree = "<group>"; };
 		C309A0BE8A8503719E642DB1 /* PreviewCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewCanvasView.swift; sourceTree = "<group>"; };
 		CABA3DFA892793AC5E2A8B05 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		CE6DF292708123151C858EE1 /* MouseLensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouseLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -259,6 +263,7 @@
 		8849A2FA0FA1342EF81D6370 /* Storage */ = {
 			isa = PBXGroup;
 			children = (
+				51A85625F946481AA95CB2DE /* BackgroundPresetCatalog.swift */,
 				D92E933D7DB3407EA9D77750 /* ProjectModels.swift */,
 			);
 			path = Storage;
@@ -353,6 +358,7 @@
 		D98F9C323B2D031400842CC7 /* Storage */ = {
 			isa = PBXGroup;
 			children = (
+				C2A1AFA2E1E64F1C9B5A4D52 /* BackgroundPresetCatalogTests.swift */,
 				DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */,
 			);
 			path = Storage;
@@ -491,6 +497,7 @@
 				F522062460B28B6FD6B6AC5E /* ExportFilenameTests.swift in Sources */,
 				83108CE3CDEE77D84EFF625F /* ExportPresetTests.swift in Sources */,
 				88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */,
+				A37BCB83BFB445C79739C4D7 /* BackgroundPresetCatalogTests.swift in Sources */,
 				99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */,
 				FD85B10F280D226F2D06FE75 /* SourceCropPlannerTests.swift in Sources */,
 			);
@@ -520,6 +527,7 @@
 				01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */,
 				CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */,
 				644B6B00A9321C433514ADB9 /* PreviewCanvasView.swift in Sources */,
+				128C0B4FD6BE493B86DB1A14 /* BackgroundPresetCatalog.swift in Sources */,
 				118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */,
 				26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */,
 				175F7434233F0509C9554848 /* RecordingState.swift in Sources */,

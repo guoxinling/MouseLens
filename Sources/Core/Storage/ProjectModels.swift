@@ -41,12 +41,102 @@ enum ProjectBackgroundStyle: String, Codable, CaseIterable {
 
 struct ProjectStyle: Codable, Equatable {
     let aspectRatio: ProjectAspectRatio
-    let background: ProjectBackgroundStyle
+    let backgroundPresetID: String
     let cornerRadius: Double
     let shadowRadius: Double
     let followStrength: Double
     let clickEmphasis: Double
     let padding: Double
+
+    var backgroundPreset: BackgroundPreset {
+        BackgroundPresetCatalog.preset(id: backgroundPresetID)
+    }
+
+    var background: ProjectBackgroundStyle {
+        BackgroundPresetCatalog.legacyStyle(forPresetID: backgroundPresetID)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case aspectRatio
+        case backgroundPresetID
+        case background
+        case cornerRadius
+        case shadowRadius
+        case followStrength
+        case clickEmphasis
+        case padding
+    }
+
+    init(
+        aspectRatio: ProjectAspectRatio,
+        backgroundPresetID: String,
+        cornerRadius: Double,
+        shadowRadius: Double,
+        followStrength: Double,
+        clickEmphasis: Double,
+        padding: Double
+    ) {
+        self.aspectRatio = aspectRatio
+        self.backgroundPresetID = backgroundPresetID
+        self.cornerRadius = cornerRadius
+        self.shadowRadius = shadowRadius
+        self.followStrength = followStrength
+        self.clickEmphasis = clickEmphasis
+        self.padding = padding
+    }
+
+    init(
+        aspectRatio: ProjectAspectRatio,
+        background: ProjectBackgroundStyle,
+        cornerRadius: Double,
+        shadowRadius: Double,
+        followStrength: Double,
+        clickEmphasis: Double,
+        padding: Double
+    ) {
+        self.init(
+            aspectRatio: aspectRatio,
+            backgroundPresetID: BackgroundPresetCatalog.legacyPresetID(for: background),
+            cornerRadius: cornerRadius,
+            shadowRadius: shadowRadius,
+            followStrength: followStrength,
+            clickEmphasis: clickEmphasis,
+            padding: padding
+        )
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let aspectRatio = try container.decode(ProjectAspectRatio.self, forKey: .aspectRatio)
+        let backgroundPresetID: String
+        if let presetID = try container.decodeIfPresent(String.self, forKey: .backgroundPresetID) {
+            backgroundPresetID = presetID
+        } else {
+            let legacy = try container.decode(ProjectBackgroundStyle.self, forKey: .background)
+            backgroundPresetID = BackgroundPresetCatalog.legacyPresetID(for: legacy)
+        }
+
+        self.init(
+            aspectRatio: aspectRatio,
+            backgroundPresetID: backgroundPresetID,
+            cornerRadius: try container.decode(Double.self, forKey: .cornerRadius),
+            shadowRadius: try container.decode(Double.self, forKey: .shadowRadius),
+            followStrength: try container.decode(Double.self, forKey: .followStrength),
+            clickEmphasis: try container.decode(Double.self, forKey: .clickEmphasis),
+            padding: try container.decode(Double.self, forKey: .padding)
+        )
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(aspectRatio, forKey: .aspectRatio)
+        try container.encode(backgroundPresetID, forKey: .backgroundPresetID)
+        try container.encode(cornerRadius, forKey: .cornerRadius)
+        try container.encode(shadowRadius, forKey: .shadowRadius)
+        try container.encode(followStrength, forKey: .followStrength)
+        try container.encode(clickEmphasis, forKey: .clickEmphasis)
+        try container.encode(padding, forKey: .padding)
+    }
 }
 
 struct ProjectTrimRange: Codable, Equatable {

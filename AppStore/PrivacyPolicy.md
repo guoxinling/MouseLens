@@ -22,7 +22,6 @@ MouseLens may request macOS permissions for:
 
 - Screen Recording: to capture the screen or selected windows.
 - Microphone: to include microphone audio when enabled.
-- Accessibility or related system permissions: to observe pointer activity for cursor reconstruction and camera motion.
 
 These permissions are used only for the app features you choose to use.
 

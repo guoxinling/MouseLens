@@ -114,8 +114,7 @@ final class HomeViewModel: ObservableObject {
 
     func requestPermissions() async {
         await environment.permissionManager.requestMissingPermissions(
-            includeMicrophone: includeMicrophone,
-            includeAccessibility: false
+            includeMicrophone: includeMicrophone
         )
         refreshPermissions()
     }

@@ -18,7 +18,6 @@ struct PermissionGateView: View {
 
             PermissionRow(label: "Screen Recording", status: viewModel.permissions.screenRecording)
             PermissionRow(label: "Microphone", status: viewModel.permissions.microphone, required: requiresMicrophone)
-            PermissionRow(label: "Accessibility", status: viewModel.permissions.accessibility, required: false)
 
             HStack {
                 Button("Close") {
@@ -57,13 +56,7 @@ struct PermissionGateView: View {
                     .foregroundStyle(AppTheme.mutedText)
             }
 
-            if !viewModel.permissions.accessibility.isGranted {
-                Text("Accessibility is optional. It only improves cursor-follow motion and should not block basic recording.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppTheme.mutedText)
-            }
-
-            Text("Detected now: Screen \(viewModel.permissions.screenRecording.rawValue), Microphone \(viewModel.permissions.microphone.rawValue), Accessibility \(viewModel.permissions.accessibility.rawValue)")
+            Text("Detected now: Screen \(viewModel.permissions.screenRecording.rawValue), Microphone \(viewModel.permissions.microphone.rawValue)")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(AppTheme.mutedText)
         }
@@ -90,10 +83,10 @@ struct PermissionGateView: View {
 
     private var permissionExplanation: String {
         if requiresMicrophone {
-            return "MouseLens needs screen recording and microphone permissions to record. Accessibility only improves cursor-follow motion."
+            return "MouseLens needs screen recording and microphone permissions to record."
         }
 
-        return "MouseLens needs screen recording permission to record. Accessibility and microphone are optional for this capture setup."
+        return "MouseLens needs screen recording permission to record. Microphone is optional for this capture setup."
     }
 
     private func completePermissionFlow() {

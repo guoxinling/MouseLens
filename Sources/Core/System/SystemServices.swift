@@ -1,6 +1,5 @@
 import AppKit
 import AVFoundation
-import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
@@ -20,12 +19,10 @@ enum PermissionStatus: String {
 struct AppPermissions: Equatable {
     let screenRecording: PermissionStatus
     let microphone: PermissionStatus
-    let accessibility: PermissionStatus
 
     static let unknown = AppPermissions(
         screenRecording: .unknown,
-        microphone: .unknown,
-        accessibility: .unknown
+        microphone: .unknown
     )
 
     func recordingReady(requiresMicrophone: Bool) -> Bool {
@@ -45,12 +42,11 @@ final class PermissionManager {
     func currentPermissions() -> AppPermissions {
         AppPermissions(
             screenRecording: screenRecordingStatus(),
-            microphone: microphoneStatus(),
-            accessibility: AXIsProcessTrusted() ? .granted : .unknown
+            microphone: microphoneStatus()
         )
     }
 
-    func requestMissingPermissions(includeMicrophone: Bool, includeAccessibility: Bool) async {
+    func requestMissingPermissions(includeMicrophone: Bool) async {
         if !CGPreflightScreenCaptureAccess() {
             screenRecordingPromptedThisLaunch = true
             _ = CGRequestScreenCaptureAccess()
@@ -58,11 +54,6 @@ final class PermissionManager {
 
         if includeMicrophone && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
-        }
-
-        if includeAccessibility && !AXIsProcessTrusted() {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
         }
     }
 

@@ -20,7 +20,7 @@ usage() {
 Usage: ./scripts/prepare_local_test_app.sh [options]
 
 Options:
-  --reset-permissions   Reset Screen Recording, Microphone, and Accessibility for MouseLens
+  --reset-permissions   Reset Screen Recording and Microphone for MouseLens
   --open                Open the canonical local test app after building
   --clean               Remove the previous local test build before rebuilding
   --help                Show this message
@@ -101,7 +101,6 @@ echo "Re-signing canonical app with stable local designated requirement..."
 if [[ "$RESET_PERMISSIONS" -eq 1 ]]; then
   echo "Resetting local macOS permissions for $BUNDLE_IDENTIFIER..."
   tccutil reset ScreenCapture "$BUNDLE_IDENTIFIER" || true
-  tccutil reset Accessibility "$BUNDLE_IDENTIFIER" || true
   tccutil reset Microphone "$BUNDLE_IDENTIFIER" || true
 fi
 

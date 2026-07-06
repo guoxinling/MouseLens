@@ -5,7 +5,7 @@ settings:
   base:
     SWIFT_VERSION: 5.0
     MARKETING_VERSION: 1.0
-    CURRENT_PROJECT_VERSION: 1
+    CURRENT_PROJECT_VERSION: 2
     MACOSX_DEPLOYMENT_TARGET: 14.0
     CODE_SIGN_STYLE: Automatic
 targets:
@@ -31,6 +31,7 @@ targets:
           ENABLE_APP_SANDBOX: NO
           ENABLE_HARDENED_RUNTIME: NO
         Release:
+          CODE_SIGN_IDENTITY: Apple Distribution
           CODE_SIGN_ENTITLEMENTS: Resources/MouseLens.entitlements
           DEVELOPMENT_TEAM: 6UYTZXY3H9
           ENABLE_APP_SANDBOX: YES

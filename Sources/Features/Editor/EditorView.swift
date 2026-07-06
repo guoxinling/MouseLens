@@ -393,13 +393,13 @@ struct EditorView: View {
         ]
 
         return LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(ProjectBackgroundStyle.allCases, id: \.self) { style in
+            ForEach(BackgroundPresetCatalog.all) { preset in
                 Button {
-                    viewModel.selectedBackground = style
+                    viewModel.selectedBackgroundPresetID = preset.id
                 } label: {
                     BackgroundSwatch(
-                        style: style,
-                        isSelected: viewModel.selectedBackground == style
+                        preset: preset,
+                        isSelected: viewModel.selectedBackgroundPresetID == preset.id
                     )
                 }
                 .buttonStyle(.plain)
@@ -1337,14 +1337,14 @@ private extension View {
 }
 
 private struct BackgroundSwatch: View {
-    let style: ProjectBackgroundStyle
+    let preset: BackgroundPreset
     let isSelected: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(style.gradient)
+                BackgroundPreviewFill(preset: preset)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(Color.white.opacity(0.92))
@@ -1365,7 +1365,7 @@ private struct BackgroundSwatch: View {
                     .strokeBorder(isSelected ? AppTheme.accent : Color.white.opacity(0.16), lineWidth: isSelected ? 2 : 1)
             )
 
-            Text(style.label)
+            Text(preset.name)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isSelected ? .white : AppTheme.mutedText)
                 .lineLimit(1)

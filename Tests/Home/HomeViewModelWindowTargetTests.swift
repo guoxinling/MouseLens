@@ -103,4 +103,18 @@ final class HomeViewModelWindowTargetTests: XCTestCase {
             )
         )
     }
+
+    func testRecordingRefreshPrefersExistingSelectionWhenPresent() {
+        XCTAssertEqual(
+            HomeViewModel.windowTargetRefreshPolicyForRecording(selectedWindowTargetID: previousWindow.id),
+            .preserveSelection
+        )
+    }
+
+    func testRecordingRefreshPrefersCurrentWindowWhenSelectionMissing() {
+        XCTAssertEqual(
+            HomeViewModel.windowTargetRefreshPolicyForRecording(selectedWindowTargetID: nil),
+            .preferCurrentWindow
+        )
+    }
 }

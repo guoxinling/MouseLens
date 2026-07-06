@@ -75,6 +75,25 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertGreaterThan(viewModel.estimatedExportByteCount, 0)
     }
 
+    func testExportEstimateCaptionUsesPlainEstimatedSizeLabel() {
+        let viewModel = makeViewModel()
+
+        XCTAssertEqual(viewModel.estimatedExportSizeCaption, "Estimated size")
+    }
+
+    func testHigherResolutionAndFrameRateIncreaseEstimate() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+        let recommendedEstimate = viewModel.estimatedExportByteCount
+
+        viewModel.updateExportResolution(.p2160)
+        viewModel.updateExportFrameRate(.fps60)
+
+        XCTAssertGreaterThan(viewModel.estimatedExportByteCount, recommendedEstimate)
+    }
+
     func testChangingAspectRatioUpdatesDraftAndExportPreset() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
@@ -84,6 +103,31 @@ final class EditorViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.project?.style.aspectRatio, .portrait)
         XCTAssertEqual(viewModel.exportPreset, .standardPortrait)
+    }
+
+    func testEditorUsesBackgroundPresetIDFromProject() {
+        let viewModel = makeViewModel()
+        let project = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            backgroundPresetID: "soft-glass"
+        )
+
+        viewModel.configure(for: project)
+
+        XCTAssertEqual(viewModel.selectedBackgroundPresetID, "soft-glass")
+        XCTAssertEqual(viewModel.project?.style.backgroundPresetID, "soft-glass")
+    }
+
+    func testChangingBackgroundPresetUpdatesDraftProjectStyle() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+        viewModel.selectedBackgroundPresetID = "horizon-glow"
+
+        XCTAssertEqual(viewModel.project?.style.backgroundPresetID, "horizon-glow")
+        XCTAssertEqual(viewModel.selectedBackgroundPresetID, "horizon-glow")
     }
 
     func testPreviewTimestampClampsToProjectDuration() {
@@ -651,6 +695,7 @@ final class EditorViewModelTests: XCTestCase {
     private func makeProject(
         followStrength: Double,
         aspectRatio: ProjectAspectRatio,
+        backgroundPresetID: String = "aurora-air",
         manualZoomSegments: [ManualZoomSegment] = [],
         zoomTrackEdited: Bool = true
     ) -> RecordingProject {
@@ -676,7 +721,7 @@ final class EditorViewModelTests: XCTestCase {
             cameraKeyframes: keyframes,
             style: ProjectStyle(
                 aspectRatio: aspectRatio,
-                background: .aurora,
+                backgroundPresetID: backgroundPresetID,
                 cornerRadius: 26,
                 shadowRadius: 30,
                 followStrength: followStrength,

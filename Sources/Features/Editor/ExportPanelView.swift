@@ -195,7 +195,7 @@ struct ExportPanelView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            Text("Estimated size: \(viewModel.estimatedExportSizeLabel)")
+            Text("\(viewModel.estimatedExportSizeCaption): \(viewModel.estimatedExportSizeLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.82))
 

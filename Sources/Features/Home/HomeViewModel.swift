@@ -163,7 +163,12 @@ final class HomeViewModel: ObservableObject {
 
         if selectedCaptureTarget == .window {
             cancelScheduledWindowTargetRefresh(invalidateRequests: false)
-            await refreshWindowTargets(policy: .preferCurrentWindow, showsLoadingState: false)
+            await refreshWindowTargets(
+                policy: Self.windowTargetRefreshPolicyForRecording(
+                    selectedWindowTargetID: selectedWindowTargetID
+                ),
+                showsLoadingState: false
+            )
             guard selectedWindowTargetID != nil else {
                 statusMessage = "No Window in This Space. Switch to a Space with a recordable window, then try again."
                 return
@@ -558,6 +563,12 @@ final class HomeViewModel: ObservableObject {
         selectedWindowTargetID: UInt32?
     ) -> Bool {
         captureTarget == .window && selectedWindowTargetID == nil
+    }
+
+    static func windowTargetRefreshPolicyForRecording(
+        selectedWindowTargetID: UInt32?
+    ) -> WindowTargetSelectionPolicy {
+        selectedWindowTargetID == nil ? .preferCurrentWindow : .preserveSelection
     }
 
     private func normalize(events: [PointerEvent], for session: CaptureSession) -> [PointerEvent] {

@@ -97,6 +97,21 @@ struct CaptureSession: Equatable, Codable {
     }
 }
 
+enum CaptureSizePolicy {
+    static let maxDimension: CGFloat = 3840
+
+    static func recommendedCaptureSize(contentRect: CGRect, pointPixelScale: CGFloat) -> CGSize {
+        let rawSize = CGSize(
+            width: max(contentRect.width * pointPixelScale, 1),
+            height: max(contentRect.height * pointPixelScale, 1)
+        )
+        let currentMax = max(rawSize.width, rawSize.height)
+        guard currentMax > maxDimension else { return rawSize }
+        let scale = maxDimension / currentMax
+        return CGSize(width: rawSize.width * scale, height: rawSize.height * scale)
+    }
+}
+
 enum ScreenRecorderError: LocalizedError {
     case alreadyRecording
     case notRecording
@@ -891,19 +906,17 @@ final class ScreenRecorder {
     }
 
     private static func recommendedCaptureSize(for filter: SCContentFilter) -> CGSize {
-        recommendedCaptureSize(contentRect: filter.contentRect, pointPixelScale: CGFloat(filter.pointPixelScale))
+        CaptureSizePolicy.recommendedCaptureSize(
+            contentRect: filter.contentRect,
+            pointPixelScale: CGFloat(filter.pointPixelScale)
+        )
     }
 
     private static func recommendedCaptureSize(contentRect: CGRect, pointPixelScale: CGFloat) -> CGSize {
-        let rawSize = CGSize(
-            width: max(contentRect.width * pointPixelScale, 1),
-            height: max(contentRect.height * pointPixelScale, 1)
+        CaptureSizePolicy.recommendedCaptureSize(
+            contentRect: contentRect,
+            pointPixelScale: pointPixelScale
         )
-        let maxDimension: CGFloat = 2560
-        let currentMax = max(rawSize.width, rawSize.height)
-        guard currentMax > maxDimension else { return rawSize }
-        let scale = maxDimension / currentMax
-        return CGSize(width: rawSize.width * scale, height: rawSize.height * scale)
     }
 
     private static func unionRect(for rects: [CGRect]) -> CGRect {

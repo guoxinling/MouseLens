@@ -16,7 +16,7 @@ final class EditorViewModel: ObservableObject {
     @Published var cornerRadius = 10.35 {
         didSet { handleStyleChange(updateExportPreset: false) }
     }
-    @Published var selectedBackground: ProjectBackgroundStyle = .ocean {
+    @Published var selectedBackgroundPresetID = BackgroundPresetCatalog.defaultPresetID {
         didSet { handleStyleChange(updateExportPreset: false) }
     }
     @Published var selectedAspectRatio: ProjectAspectRatio = .landscape {
@@ -95,7 +95,7 @@ final class EditorViewModel: ObservableObject {
         clickEmphasis = motionSettings.clickEmphasis
         padding = project.style.padding
         cornerRadius = project.style.cornerRadius
-        selectedBackground = project.style.background
+        selectedBackgroundPresetID = project.style.backgroundPresetID
         selectedAspectRatio = project.style.aspectRatio
         trimStart = project.effectiveTrimRange.start
         trimEnd = project.effectiveTrimRange.end
@@ -184,19 +184,19 @@ final class EditorViewModel: ObservableObject {
     }
 
     var estimatedExportByteCount: Int64 {
-        let aspectRatio = project?.style.aspectRatio ?? selectedAspectRatio
-        let renderSize = exportConfiguration.renderSize(for: aspectRatio)
-        let videoBitRate = exportConfiguration.quality.averageBitRate(
-            renderSize: renderSize,
-            frameRate: exportConfiguration.frameRate
+        ExportSizeEstimator.estimatedByteCount(
+            for: exportConfiguration,
+            aspectRatio: project?.style.aspectRatio ?? selectedAspectRatio,
+            duration: project?.trimmedDuration ?? 0
         )
-        let audioBitRate = 192_000
-        let duration = max(project?.trimmedDuration ?? 0, 0)
-        return max(Int64((Double(videoBitRate + audioBitRate) * duration) / 8), 0)
     }
 
     var estimatedExportSizeLabel: String {
         ByteCountFormatter.string(fromByteCount: estimatedExportByteCount, countStyle: .file)
+    }
+
+    var estimatedExportSizeCaption: String {
+        "Estimated size"
     }
 
     func updateExportResolution(_ value: ExportResolution) {
@@ -622,7 +622,7 @@ final class EditorViewModel: ObservableObject {
 
         let style = ProjectStyle(
             aspectRatio: selectedAspectRatio,
-            background: selectedBackground,
+            backgroundPresetID: selectedBackgroundPresetID,
             cornerRadius: cornerRadius,
             shadowRadius: 0,
             followStrength: motionSettings.followStrength,

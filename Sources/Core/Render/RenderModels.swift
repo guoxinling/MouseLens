@@ -23,12 +23,16 @@ enum ExportFormat: String, CaseIterable, Equatable {
 
 enum ExportResolution: String, CaseIterable, Equatable {
     case p1080
+    case p1440
+    case p2160
     case p720
     case p480
 
     var label: String {
         switch self {
         case .p1080: "1080p"
+        case .p1440: "1440p"
+        case .p2160: "4K"
         case .p720: "720p"
         case .p480: "480p"
         }
@@ -37,6 +41,10 @@ enum ExportResolution: String, CaseIterable, Equatable {
     func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
         let dimensions: (long: CGFloat, short: CGFloat)
         switch self {
+        case .p2160:
+            dimensions = (3840, 2160)
+        case .p1440:
+            dimensions = (2560, 1440)
         case .p1080:
             dimensions = (1920, 1080)
         case .p720:
@@ -57,6 +65,7 @@ enum ExportResolution: String, CaseIterable, Equatable {
 }
 
 enum ExportFrameRate: Int32, CaseIterable, Equatable {
+    case fps60 = 60
     case fps15 = 15
     case fps24 = 24
     case fps30 = 30
@@ -76,19 +85,39 @@ enum ExportQuality: String, CaseIterable, Equatable {
     }
 
     func averageBitRate(renderSize: CGSize, frameRate: ExportFrameRate) -> Int {
-        let baseBitRate: Double
+        let highQualityBitRate = Self.highQualityBitRate(
+            renderSize: renderSize,
+            frameRate: frameRate
+        )
+        let scaledBitRate: Double
         switch self {
         case .high:
-            baseBitRate = 8_000_000
+            scaledBitRate = Double(highQualityBitRate)
         case .balanced:
-            baseBitRate = 5_000_000
+            scaledBitRate = Double(highQualityBitRate) * 0.6
         case .small:
-            baseBitRate = 3_000_000
+            scaledBitRate = Double(highQualityBitRate) * 0.35
         }
 
-        let pixelScale = (renderSize.width * renderSize.height) / (1920 * 1080)
-        let frameScale = Double(frameRate.rawValue) / 30
-        return max(Int(baseBitRate * pixelScale * frameScale), 750_000)
+        return max(Int(scaledBitRate.rounded()), 750_000)
+    }
+
+    private static func highQualityBitRate(renderSize: CGSize, frameRate: ExportFrameRate) -> Int {
+        let longestSide = max(renderSize.width, renderSize.height)
+        let isSixtyFPS = frameRate == .fps60
+
+        switch longestSide {
+        case ...854:
+            return isSixtyFPS ? 5_000_000 : 3_000_000
+        case ...1280:
+            return isSixtyFPS ? 12_000_000 : 8_000_000
+        case ...1920:
+            return isSixtyFPS ? 28_000_000 : 20_000_000
+        case ...2560:
+            return isSixtyFPS ? 40_000_000 : 28_000_000
+        default:
+            return isSixtyFPS ? 55_000_000 : 40_000_000
+        }
     }
 }
 
@@ -113,6 +142,112 @@ struct ExportConfiguration: Equatable {
 
     func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
         resolution.renderSize(for: aspectRatio)
+    }
+}
+
+enum ExportSizeEstimator {
+    private static let estimatedAudioBitRate = 128_000
+
+    static func estimatedByteCount(
+        for configuration: ExportConfiguration,
+        aspectRatio: ProjectAspectRatio,
+        duration: TimeInterval
+    ) -> Int64 {
+        let clampedDuration = max(duration, 0)
+        guard clampedDuration > 0 else { return 0 }
+
+        let renderSize = configuration.renderSize(for: aspectRatio)
+        let targetVideoBitRate = configuration.quality.averageBitRate(
+            renderSize: renderSize,
+            frameRate: configuration.frameRate
+        )
+        let effectiveVideoBitRate = Int(
+            (Double(targetVideoBitRate) * utilizationFactor(
+                renderSize: renderSize,
+                frameRate: configuration.frameRate,
+                quality: configuration.quality
+            )).rounded()
+        )
+
+        return max(
+            Int64(
+                (Double(effectiveVideoBitRate + estimatedAudioBitRate) * clampedDuration / 8.0).rounded()
+            ),
+            0
+        )
+    }
+
+    private static func utilizationFactor(
+        renderSize: CGSize,
+        frameRate: ExportFrameRate,
+        quality: ExportQuality
+    ) -> Double {
+        let longestSide = max(renderSize.width, renderSize.height)
+        let resolutionFactor: Double
+        switch longestSide {
+        case ...854:
+            resolutionFactor = 0.82
+        case ...1280:
+            resolutionFactor = 0.80
+        case ...1920:
+            resolutionFactor = 0.72
+        case ...2560:
+            resolutionFactor = 0.74
+        default:
+            resolutionFactor = 0.66
+        }
+
+        let frameRateAdjustment: Double
+        switch frameRate {
+        case .fps15:
+            frameRateAdjustment = 0.05
+        case .fps24:
+            frameRateAdjustment = 0.02
+        case .fps30:
+            frameRateAdjustment = 0.0
+        case .fps60:
+            frameRateAdjustment = -0.12
+        }
+
+        let qualityAdjustment: Double
+        switch quality {
+        case .high:
+            qualityAdjustment = 0.0
+        case .balanced:
+            qualityAdjustment = 0.02
+        case .small:
+            qualityAdjustment = 0.05
+        }
+
+        return min(max(resolutionFactor + frameRateAdjustment + qualityAdjustment, 0.45), 0.9)
+    }
+}
+
+enum VideoExportSettingsBuilder {
+    static func makeOutputSettings(renderSize: CGSize, averageBitRate: Int) -> [String: Any] {
+        [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: renderSize.width,
+            AVVideoHeightKey: renderSize.height,
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+            ],
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: averageBitRate,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            ]
+        ]
+    }
+}
+
+enum FinalAudioMuxStrategy: Equatable {
+    case passthroughSingleTrack
+    case reencodeForMixdown
+
+    static func forSourceAudioTrackCount(_ trackCount: Int) -> FinalAudioMuxStrategy {
+        trackCount <= 1 ? .passthroughSingleTrack : .reencodeForMixdown
     }
 }
 
@@ -842,7 +977,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         for project: RecordingProject,
         renderSize: CGSize,
         frameRate: Int32 = 30,
-        averageBitRate: Int = 8_000_000,
+        averageBitRate: Int = 20_000_000,
         includesCursor: Bool = true,
         includesClickFeedback: Bool = true,
         destinationURL: URL
@@ -854,15 +989,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .mp4)
         let size = renderSize
-        let outputSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: size.width,
-            AVVideoHeightKey: size.height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: averageBitRate,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
-            ]
-        ]
+        let outputSettings = VideoExportSettingsBuilder.makeOutputSettings(
+            renderSize: size,
+            averageBitRate: averageBitRate
+        )
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
         input.expectsMediaDataInRealTime = false
@@ -948,7 +1078,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         sourceURL: URL,
         renderSize: CGSize,
         frameRate: Int32 = 30,
-        averageBitRate: Int = 8_000_000,
+        averageBitRate: Int = 20_000_000,
         includesCursor: Bool = true,
         includesClickFeedback: Bool = true,
         destinationURL: URL
@@ -1015,15 +1145,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
 
-        let outputSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: renderSize.width,
-            AVVideoHeightKey: renderSize.height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: averageBitRate,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
-            ]
-        ]
+        let outputSettings = VideoExportSettingsBuilder.makeOutputSettings(
+            renderSize: renderSize,
+            averageBitRate: averageBitRate
+        )
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
         input.expectsMediaDataInRealTime = false
@@ -1175,6 +1300,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         compositionVideoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
 
         let sourceAudioTracks = try await sourceAsset.loadTracks(withMediaType: .audio)
+        let muxStrategy = FinalAudioMuxStrategy.forSourceAudioTrackCount(sourceAudioTracks.count)
         var audioMixParameters: [AVMutableAudioMixInputParameters] = []
         if !sourceAudioTracks.isEmpty {
             let sourceAudioDuration = try await sourceAsset.load(.duration)
@@ -1210,17 +1336,21 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     outputCursor = CMTimeAdd(outputCursor, audioDuration)
                 }
 
-                let inputParameters = AVMutableAudioMixInputParameters(track: compositionAudioTrack)
-                inputParameters.setVolume(1.0, at: .zero)
-                audioMixParameters.append(inputParameters)
+                if muxStrategy == .reencodeForMixdown {
+                    let inputParameters = AVMutableAudioMixInputParameters(track: compositionAudioTrack)
+                    inputParameters.setVolume(1.0, at: .zero)
+                    audioMixParameters.append(inputParameters)
+                }
             }
         }
 
-        // ScreenCaptureKit system-audio tracks are not consistently mp4-compatible
-        // when passed through directly. Re-encoding keeps single-track exports
-        // stable instead of failing only when the source happens to contain a
-        // non-passthrough-friendly audio format.
-        let exportPreset = AVAssetExportPresetHighestQuality
+        let exportPreset: String
+        switch muxStrategy {
+        case .passthroughSingleTrack:
+            exportPreset = AVAssetExportPresetPassthrough
+        case .reencodeForMixdown:
+            exportPreset = AVAssetExportPresetHighestQuality
+        }
 
         guard let exportSession = AVAssetExportSession(asset: composition, presetName: exportPreset) else {
             throw VideoRendererError.unableToCreateExportSession
@@ -1229,7 +1359,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         exportSession.outputURL = destinationURL
         exportSession.outputFileType = .mp4
         exportSession.shouldOptimizeForNetworkUse = true
-        if sourceAudioTracks.count > 1, audioMixParameters.isEmpty == false {
+        if muxStrategy == .reencodeForMixdown, audioMixParameters.isEmpty == false {
             let audioMix = AVMutableAudioMix()
             audioMix.inputParameters = audioMixParameters
             exportSession.audioMix = audioMix

@@ -113,6 +113,74 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.estimatedExportSizeCaption, "Approx. size")
     }
 
+    func testSelectingActiveFormatDoesNotResetModifiedConfiguration() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+        viewModel.updateExportResolution(.p720)
+
+        viewModel.updateExportFormat(.mp4)
+
+        XCTAssertEqual(viewModel.exportConfiguration.format, .mp4)
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p720)
+        XCTAssertTrue(viewModel.isExportConfigurationModified)
+    }
+
+    func testLongDurationGIFShowsWarning() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            duration: 12.1
+        ))
+
+        viewModel.updateExportFormat(.gif)
+
+        XCTAssertTrue(viewModel.showsGIFDurationWarning)
+        XCTAssertEqual(
+            viewModel.gifDurationWarningText,
+            "Long GIFs can become large. Trim the clip if you want a smaller file."
+        )
+    }
+
+    func testSwitchingModifiedMP4ConfigurationToGIFNormalizesHiddenValues() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+        viewModel.updateExportQuality(.small)
+        viewModel.updateExportIncludesCursor(false)
+        viewModel.updateExportIncludesClickFeedback(false)
+
+        viewModel.updateExportFormat(.gif)
+
+        XCTAssertEqual(viewModel.exportConfiguration.format, .gif)
+        XCTAssertEqual(viewModel.exportConfiguration.quality, .balanced)
+        XCTAssertTrue(viewModel.exportConfiguration.includesCursor)
+        XCTAssertTrue(viewModel.exportConfiguration.includesClickFeedback)
+    }
+
+    func testHiddenGIFOnlyValuesStayNormalizedWhenMutated() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+        viewModel.updateExportFormat(.gif)
+
+        viewModel.updateExportQuality(.small)
+        viewModel.updateExportIncludesCursor(false)
+        viewModel.updateExportIncludesClickFeedback(false)
+
+        XCTAssertEqual(viewModel.exportConfiguration.quality, .balanced)
+        XCTAssertTrue(viewModel.exportConfiguration.includesCursor)
+        XCTAssertTrue(viewModel.exportConfiguration.includesClickFeedback)
+    }
+
+    func testGIFExportIsDisabledInThisBuild() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+
+        viewModel.updateExportFormat(.gif)
+
+        XCTAssertFalse(viewModel.canExportSelectedFormat)
+        XCTAssertEqual(viewModel.exportUnavailableMessage, "GIF export is not available in this build yet.")
+    }
+
     func testHigherResolutionAndFrameRateIncreaseEstimate() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)

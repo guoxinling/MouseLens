@@ -125,6 +125,10 @@ final class EditorViewModel: ObservableObject {
 
     func export() async {
         guard let project else { return }
+        guard canExportSelectedFormat else {
+            exportState = .failed(exportUnavailableMessage ?? "This export format is not available yet.")
+            return
+        }
         guard exportConfiguration.format.isAvailable else {
             exportState = .failed("This export format is not available yet.")
             return
@@ -208,7 +212,26 @@ final class EditorViewModel: ObservableObject {
         "Long GIFs can become large. Trim the clip if you want a smaller file."
     }
 
+    var canExportSelectedFormat: Bool {
+        switch exportConfiguration.format {
+        case .mp4:
+            exportConfiguration.format.isAvailable
+        case .gif:
+            false
+        }
+    }
+
+    var exportUnavailableMessage: String? {
+        switch exportConfiguration.format {
+        case .mp4:
+            nil
+        case .gif:
+            "GIF export is not available in this build yet."
+        }
+    }
+
     func updateExportFormat(_ format: ExportFormat) {
+        guard exportConfiguration.format != format else { return }
         exportConfiguration = .recommended(for: selectedAspectRatio, format: format)
         isExportConfigurationModified = false
         exportState = .idle

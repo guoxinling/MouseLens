@@ -223,6 +223,14 @@ struct ExportPanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let unavailableMessage = viewModel.exportUnavailableMessage {
+                Label(unavailableMessage, systemImage: "info.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.mutedText.opacity(0.92))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("\(viewModel.estimatedExportSizeCaption): \(viewModel.estimatedExportSizeLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.82))
@@ -244,7 +252,7 @@ struct ExportPanelView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(isExporting || !viewModel.exportConfiguration.format.isAvailable)
+            .disabled(isExporting || !viewModel.canExportSelectedFormat)
         }
         .padding(.horizontal, 18)
         .padding(.top, 13)

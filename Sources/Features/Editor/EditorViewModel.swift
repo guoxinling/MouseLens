@@ -49,6 +49,7 @@ final class EditorViewModel: ObservableObject {
     private let cameraPlanEngine: CameraPlanEngine
     private let projectStore: ProjectStore
     private let preferencesStore: AppPreferencesStore
+    private let exportSavePanelURLProvider: ((RecordingProject, ExportConfiguration) -> URL?)?
     private let baseZoom = 1.0
     private let clickDuration = 0.6
     private let gifWarningDurationThreshold = 12.0
@@ -68,13 +69,15 @@ final class EditorViewModel: ObservableObject {
         previewRenderer: any ProjectPreviewRendering,
         cameraPlanEngine: CameraPlanEngine,
         projectStore: ProjectStore,
-        preferencesStore: AppPreferencesStore
+        preferencesStore: AppPreferencesStore,
+        exportSavePanelURLProvider: ((RecordingProject, ExportConfiguration) -> URL?)? = nil
     ) {
         self.exportCoordinator = exportCoordinator
         self.previewRenderer = previewRenderer
         self.cameraPlanEngine = cameraPlanEngine
         self.projectStore = projectStore
         self.preferencesStore = preferencesStore
+        self.exportSavePanelURLProvider = exportSavePanelURLProvider
     }
 
     deinit {
@@ -125,10 +128,6 @@ final class EditorViewModel: ObservableObject {
 
     func export() async {
         guard let project else { return }
-        guard canExportSelectedFormat else {
-            exportState = .failed(exportUnavailableMessage ?? "This export format is not available yet.")
-            return
-        }
         guard exportConfiguration.format.isAvailable else {
             exportState = .failed("This export format is not available yet.")
             return
@@ -160,25 +159,40 @@ final class EditorViewModel: ObservableObject {
         for project: RecordingProject,
         configuration: ExportConfiguration
     ) -> URL? {
+        if let exportSavePanelURLProvider {
+            return exportSavePanelURLProvider(project, configuration)
+        }
+
         let panel = NSSavePanel()
-        panel.title = "Export MP4"
-        panel.message = "Choose where MouseLens should save the exported video."
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = ExportCoordinator.exportFilename(
             for: project,
             configuration: configuration
         )
-        panel.allowedContentTypes = [.mpeg4Movie]
         panel.directoryURL = defaultExportDirectoryURL()
+
+        let requiredPathExtension: String
+        switch configuration.format {
+        case .mp4:
+            panel.title = "Export MP4"
+            panel.message = "Choose where MouseLens should save the exported video."
+            panel.allowedContentTypes = [.mpeg4Movie]
+            requiredPathExtension = "mp4"
+        case .gif:
+            panel.title = "Export GIF"
+            panel.message = "Choose where MouseLens should save the exported GIF."
+            panel.allowedContentTypes = [.gif]
+            requiredPathExtension = "gif"
+        }
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return nil
         }
 
-        return url.pathExtension.lowercased() == "mp4"
+        return url.pathExtension.lowercased() == requiredPathExtension
             ? url
-            : url.appendingPathExtension("mp4")
+            : url.appendingPathExtension(requiredPathExtension)
     }
 
     var exportButtonLabel: String {
@@ -213,21 +227,11 @@ final class EditorViewModel: ObservableObject {
     }
 
     var canExportSelectedFormat: Bool {
-        switch exportConfiguration.format {
-        case .mp4:
-            exportConfiguration.format.isAvailable
-        case .gif:
-            false
-        }
+        exportConfiguration.format.isAvailable
     }
 
     var exportUnavailableMessage: String? {
-        switch exportConfiguration.format {
-        case .mp4:
-            nil
-        case .gif:
-            "GIF export is not available in this build yet."
-        }
+        nil
     }
 
     func updateExportFormat(_ format: ExportFormat) {

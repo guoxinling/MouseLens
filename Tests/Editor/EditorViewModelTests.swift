@@ -171,14 +171,23 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.exportConfiguration.includesClickFeedback)
     }
 
-    func testGIFExportIsDisabledInThisBuild() {
-        let viewModel = makeViewModel()
+    func testGIFExportUsesRendererPathWhenSelected() async {
+        let destinationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("gif")
+        let viewModel = makeViewModel(exportSavePanelURL: destinationURL)
         viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
 
         viewModel.updateExportFormat(.gif)
 
-        XCTAssertFalse(viewModel.canExportSelectedFormat)
-        XCTAssertEqual(viewModel.exportUnavailableMessage, "GIF export is not available in this build yet.")
+        await viewModel.export()
+
+        guard case .failed(let message) = viewModel.exportState else {
+            return XCTFail("Expected GIF export to fail in the renderer until Task 4 lands.")
+        }
+
+        XCTAssertTrue(message.contains("This export format is not available yet."))
+        XCTAssertNotEqual(message, "This export format is not available yet.")
     }
 
     func testHigherResolutionAndFrameRateIncreaseEstimate() {
@@ -779,7 +788,7 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(normalized[0].location.y, 0.5, accuracy: 0.0001)
     }
 
-    private func makeViewModel() -> EditorViewModel {
+    private func makeViewModel(exportSavePanelURL: URL? = nil) -> EditorViewModel {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ProjectStore(rootDirectoryURL: directory)
         let coordinator = ExportCoordinator(renderer: VideoRenderer(), projectStore: store)
@@ -788,7 +797,8 @@ final class EditorViewModelTests: XCTestCase {
             previewRenderer: VideoRenderer(),
             cameraPlanEngine: CameraPlanEngine(),
             projectStore: store,
-            preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+            preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            exportSavePanelURLProvider: { _, _ in exportSavePanelURL }
         )
     }
 

@@ -19,6 +19,15 @@ enum ExportFormat: String, CaseIterable, Equatable {
     var isAvailable: Bool {
         true
     }
+
+    var fileExtension: String {
+        switch self {
+        case .mp4:
+            "mp4"
+        case .gif:
+            "gif"
+        }
+    }
 }
 
 enum ExportResolution: String, CaseIterable, Equatable {
@@ -2152,7 +2161,9 @@ final class ExportCoordinator {
         let workingDirectory = projectStore.exportDirectory(for: project)
         try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true, attributes: nil)
 
-        let workingURL = workingDirectory.appendingPathComponent("working-\(UUID().uuidString).mp4")
+        let workingURL = workingDirectory.appendingPathComponent(
+            "working-\(UUID().uuidString).\(configuration.format.fileExtension)"
+        )
         defer {
             if workingURL.standardizedFileURL != destinationURL.standardizedFileURL {
                 try? FileManager.default.removeItem(at: workingURL)
@@ -2196,7 +2207,8 @@ final class ExportCoordinator {
     }
 
     static func exportFilename(for project: RecordingProject, configuration: ExportConfiguration) -> String {
-        "\(exportFilenameStem(for: project))-\(configuration.format.rawValue)-\(configuration.resolution.rawValue).mp4"
+        let formatExtension = configuration.format.fileExtension
+        return "\(exportFilenameStem(for: project))-\(configuration.format.rawValue)-\(configuration.resolution.rawValue).\(formatExtension)"
     }
 
     private static func exportFilenameStem(for project: RecordingProject) -> String {

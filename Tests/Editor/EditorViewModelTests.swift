@@ -81,6 +81,38 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.estimatedExportSizeCaption, "Estimated size")
     }
 
+    func testSwitchingToGIFUsesApprovedDefaults() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+
+        viewModel.updateExportFormat(.gif)
+
+        XCTAssertEqual(viewModel.exportConfiguration.format, .gif)
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p720)
+        XCTAssertEqual(viewModel.exportConfiguration.frameRate, .fps15)
+        XCTAssertEqual(viewModel.exportConfiguration.quality, .balanced)
+        XCTAssertEqual(viewModel.exportButtonLabel, "Export GIF")
+    }
+
+    func testGIFResolutionCanSwitchTo1080p() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+        viewModel.updateExportFormat(.gif)
+
+        viewModel.updateExportResolution(.p1080)
+
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p1080)
+    }
+
+    func testGIFExportShowsApproximateSizeCaption() {
+        let viewModel = makeViewModel()
+        viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
+
+        viewModel.updateExportFormat(.gif)
+
+        XCTAssertEqual(viewModel.estimatedExportSizeCaption, "Approx. size")
+    }
+
     func testHigherResolutionAndFrameRateIncreaseEstimate() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
@@ -697,7 +729,8 @@ final class EditorViewModelTests: XCTestCase {
         aspectRatio: ProjectAspectRatio,
         backgroundPresetID: String = "aurora-air",
         manualZoomSegments: [ManualZoomSegment] = [],
-        zoomTrackEdited: Bool = true
+        zoomTrackEdited: Bool = true,
+        duration: TimeInterval = 1.0
     ) -> RecordingProject {
         let events = [
             PointerEvent(timestamp: 0.0, location: .init(x: 0.1, y: 0.2), type: .move),
@@ -715,7 +748,7 @@ final class EditorViewModelTests: XCTestCase {
             id: UUID(),
             name: "EditorDraft",
             createdAt: Date(),
-            duration: 1.0,
+            duration: duration,
             sourceVideoURL: nil,
             events: events,
             cameraKeyframes: keyframes,

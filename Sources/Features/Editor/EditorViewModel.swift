@@ -51,6 +51,7 @@ final class EditorViewModel: ObservableObject {
     private let preferencesStore: AppPreferencesStore
     private let baseZoom = 1.0
     private let clickDuration = 0.6
+    private let gifWarningDurationThreshold = 12.0
     private let minimumTrimDuration = 0.2
     private let minimumManualZoomDuration = ManualZoomSegment.minimumDuration
     private var sourceProject: RecordingProject?
@@ -196,15 +197,37 @@ final class EditorViewModel: ObservableObject {
     }
 
     var estimatedExportSizeCaption: String {
-        "Estimated size"
+        exportConfiguration.format == .gif ? "Approx. size" : "Estimated size"
+    }
+
+    var showsGIFDurationWarning: Bool {
+        exportConfiguration.format == .gif && (project?.trimmedDuration ?? 0) > gifWarningDurationThreshold
+    }
+
+    var gifDurationWarningText: String {
+        "Long GIFs can become large. Trim the clip if you want a smaller file."
+    }
+
+    func updateExportFormat(_ format: ExportFormat) {
+        exportConfiguration = .recommended(for: selectedAspectRatio, format: format)
+        isExportConfigurationModified = false
+        exportState = .idle
     }
 
     func updateExportResolution(_ value: ExportResolution) {
-        updateExportConfiguration { $0.resolution = value }
+        updateExportConfiguration {
+            if ExportConfiguration.allowedResolutions(for: $0.format).contains(value) {
+                $0.resolution = value
+            }
+        }
     }
 
     func updateExportFrameRate(_ value: ExportFrameRate) {
-        updateExportConfiguration { $0.frameRate = value }
+        updateExportConfiguration {
+            if ExportConfiguration.allowedFrameRates(for: $0.format).contains(value) {
+                $0.frameRate = value
+            }
+        }
     }
 
     func updateExportQuality(_ value: ExportQuality) {
@@ -220,14 +243,22 @@ final class EditorViewModel: ObservableObject {
     }
 
     func resetExportConfiguration() {
-        exportConfiguration = .recommended(for: selectedAspectRatio)
+        exportConfiguration = .recommended(for: selectedAspectRatio, format: exportConfiguration.format)
         isExportConfigurationModified = false
         exportState = .idle
     }
 
     private func updateExportConfiguration(_ change: (inout ExportConfiguration) -> Void) {
         change(&exportConfiguration)
-        isExportConfigurationModified = exportConfiguration != .recommended(for: selectedAspectRatio)
+        if exportConfiguration.format == .gif {
+            exportConfiguration.quality = .balanced
+            exportConfiguration.includesCursor = true
+            exportConfiguration.includesClickFeedback = true
+        }
+        isExportConfigurationModified = exportConfiguration != .recommended(
+            for: selectedAspectRatio,
+            format: exportConfiguration.format
+        )
         exportState = .idle
     }
 

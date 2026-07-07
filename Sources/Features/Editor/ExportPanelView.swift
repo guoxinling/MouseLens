@@ -9,6 +9,10 @@ struct ExportPanelView: View {
         viewModel.exportState == .exporting
     }
 
+    private var isGIF: Bool {
+        viewModel.exportConfiguration.format == .gif
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -20,15 +24,17 @@ struct ExportPanelView: View {
                         title: "MP4",
                         subtitle: "H.264 · Recommended",
                         iconText: "H.264",
-                        isSelected: true,
-                        isEnabled: true
+                        isSelected: viewModel.exportConfiguration.format == .mp4,
+                        isEnabled: true,
+                        action: { viewModel.updateExportFormat(.mp4) }
                     )
                     formatCard(
                         title: "GIF",
-                        subtitle: "Looping · Coming soon",
+                        subtitle: "720p / 15 fps default",
                         iconText: "GIF",
-                        isSelected: false,
-                        isEnabled: false
+                        isSelected: viewModel.exportConfiguration.format == .gif,
+                        isEnabled: true,
+                        action: { viewModel.updateExportFormat(.gif) }
                     )
 
                     settingsHeader
@@ -123,7 +129,10 @@ struct ExportPanelView: View {
                     get: { viewModel.exportConfiguration.resolution },
                     set: { viewModel.updateExportResolution($0) }
                 )) {
-                    ForEach(ExportResolution.allCases, id: \.self) { resolution in
+                    ForEach(
+                        ExportConfiguration.allowedResolutions(for: viewModel.exportConfiguration.format),
+                        id: \.self
+                    ) { resolution in
                         Text(resolution.label).tag(resolution)
                     }
                 }
@@ -134,55 +143,66 @@ struct ExportPanelView: View {
             Divider().overlay(Color.white.opacity(0.08))
 
             settingsRow("Frame Rate") {
-                Picker("Frame Rate", selection: Binding(
-                    get: { viewModel.exportConfiguration.frameRate },
-                    set: { viewModel.updateExportFrameRate($0) }
-                )) {
-                    ForEach(ExportFrameRate.allCases.reversed(), id: \.self) { frameRate in
-                        Text(frameRate.label).tag(frameRate)
+                if isGIF {
+                    Text("15 fps")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.mutedText)
+                } else {
+                    Picker("Frame Rate", selection: Binding(
+                        get: { viewModel.exportConfiguration.frameRate },
+                        set: { viewModel.updateExportFrameRate($0) }
+                    )) {
+                        ForEach(
+                            ExportConfiguration.allowedFrameRates(for: viewModel.exportConfiguration.format),
+                            id: \.self
+                        ) { frameRate in
+                            Text(frameRate.label).tag(frameRate)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 112)
                 }
-                .labelsHidden()
-                .frame(width: 112)
             }
 
-            Divider().overlay(Color.white.opacity(0.08))
+            if !isGIF {
+                Divider().overlay(Color.white.opacity(0.08))
 
-            settingsRow("Quality") {
-                Picker("Quality", selection: Binding(
-                    get: { viewModel.exportConfiguration.quality },
-                    set: { viewModel.updateExportQuality($0) }
-                )) {
-                    ForEach(ExportQuality.allCases, id: \.self) { quality in
-                        Text(quality.label).tag(quality)
+                settingsRow("Quality") {
+                    Picker("Quality", selection: Binding(
+                        get: { viewModel.exportConfiguration.quality },
+                        set: { viewModel.updateExportQuality($0) }
+                    )) {
+                        ForEach(ExportQuality.allCases, id: \.self) { quality in
+                            Text(quality.label).tag(quality)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 112)
                 }
-                .labelsHidden()
-                .frame(width: 112)
-            }
 
-            Divider().overlay(Color.white.opacity(0.08))
+                Divider().overlay(Color.white.opacity(0.08))
 
-            settingsRow("Include Cursor") {
-                Toggle("Include Cursor", isOn: Binding(
-                    get: { viewModel.exportConfiguration.includesCursor },
-                    set: { viewModel.updateExportIncludesCursor($0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
+                settingsRow("Include Cursor") {
+                    Toggle("Include Cursor", isOn: Binding(
+                        get: { viewModel.exportConfiguration.includesCursor },
+                        set: { viewModel.updateExportIncludesCursor($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
 
-            Divider().overlay(Color.white.opacity(0.08))
+                Divider().overlay(Color.white.opacity(0.08))
 
-            settingsRow("Click Feedback") {
-                Toggle("Click Feedback", isOn: Binding(
-                    get: { viewModel.exportConfiguration.includesClickFeedback },
-                    set: { viewModel.updateExportIncludesClickFeedback($0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
+                settingsRow("Click Feedback") {
+                    Toggle("Click Feedback", isOn: Binding(
+                        get: { viewModel.exportConfiguration.includesClickFeedback },
+                        set: { viewModel.updateExportIncludesClickFeedback($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -195,6 +215,14 @@ struct ExportPanelView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
+            if viewModel.showsGIFDurationWarning {
+                Label(viewModel.gifDurationWarningText, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("\(viewModel.estimatedExportSizeCaption): \(viewModel.estimatedExportSizeLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.82))
@@ -239,9 +267,10 @@ struct ExportPanelView: View {
         subtitle: String,
         iconText: String,
         isSelected: Bool,
-        isEnabled: Bool
+        isEnabled: Bool,
+        action: @escaping () -> Void
     ) -> some View {
-        Button(action: {}) {
+        Button(action: action) {
             HStack(spacing: 12) {
                 Text(iconText)
                     .font(.system(size: 10, weight: .bold))

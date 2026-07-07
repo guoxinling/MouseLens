@@ -17,7 +17,7 @@ enum ExportFormat: String, CaseIterable, Equatable {
     }
 
     var isAvailable: Bool {
-        self == .mp4
+        true
     }
 }
 
@@ -129,15 +129,48 @@ struct ExportConfiguration: Equatable {
     var includesCursor: Bool
     var includesClickFeedback: Bool
 
-    static func recommended(for aspectRatio: ProjectAspectRatio) -> ExportConfiguration {
-        ExportConfiguration(
-            format: .mp4,
-            resolution: .p1080,
-            frameRate: .fps30,
-            quality: .high,
-            includesCursor: true,
-            includesClickFeedback: true
-        )
+    static func recommended(
+        for aspectRatio: ProjectAspectRatio,
+        format: ExportFormat = .mp4
+    ) -> ExportConfiguration {
+        switch format {
+        case .mp4:
+            ExportConfiguration(
+                format: .mp4,
+                resolution: .p1080,
+                frameRate: .fps30,
+                quality: .high,
+                includesCursor: true,
+                includesClickFeedback: true
+            )
+        case .gif:
+            ExportConfiguration(
+                format: .gif,
+                resolution: .p720,
+                frameRate: .fps15,
+                quality: .balanced,
+                includesCursor: true,
+                includesClickFeedback: true
+            )
+        }
+    }
+
+    static func allowedResolutions(for format: ExportFormat) -> [ExportResolution] {
+        switch format {
+        case .mp4:
+            [.p720, .p1080, .p1440, .p2160, .p480]
+        case .gif:
+            [.p720, .p1080]
+        }
+    }
+
+    static func allowedFrameRates(for format: ExportFormat) -> [ExportFrameRate] {
+        switch format {
+        case .mp4:
+            ExportFrameRate.allCases.reversed()
+        case .gif:
+            [.fps15]
+        }
     }
 
     func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
@@ -156,25 +189,43 @@ enum ExportSizeEstimator {
         let clampedDuration = max(duration, 0)
         guard clampedDuration > 0 else { return 0 }
 
-        let renderSize = configuration.renderSize(for: aspectRatio)
-        let targetVideoBitRate = configuration.quality.averageBitRate(
-            renderSize: renderSize,
-            frameRate: configuration.frameRate
-        )
-        let effectiveVideoBitRate = Int(
-            (Double(targetVideoBitRate) * utilizationFactor(
+        switch configuration.format {
+        case .mp4:
+            let renderSize = configuration.renderSize(for: aspectRatio)
+            let targetVideoBitRate = configuration.quality.averageBitRate(
                 renderSize: renderSize,
-                frameRate: configuration.frameRate,
-                quality: configuration.quality
-            )).rounded()
-        )
+                frameRate: configuration.frameRate
+            )
+            let effectiveVideoBitRate = Int(
+                (Double(targetVideoBitRate) * utilizationFactor(
+                    renderSize: renderSize,
+                    frameRate: configuration.frameRate,
+                    quality: configuration.quality
+                )).rounded()
+            )
 
-        return max(
-            Int64(
-                (Double(effectiveVideoBitRate + estimatedAudioBitRate) * clampedDuration / 8.0).rounded()
-            ),
-            0
-        )
+            return max(
+                Int64(
+                    (Double(effectiveVideoBitRate + estimatedAudioBitRate) * clampedDuration / 8.0).rounded()
+                ),
+                0
+            )
+        case .gif:
+            let renderSize = configuration.renderSize(for: aspectRatio)
+            let frameCount = max(
+                Int((clampedDuration * Double(configuration.frameRate.rawValue)).rounded(.up)),
+                1
+            )
+            let bytesPerPixelFrame: CGFloat = renderSize.width >= 1920 ? 0.095 : 0.072
+
+            return max(
+                Int64(
+                    (renderSize.width * renderSize.height * CGFloat(frameCount) * bytesPerPixelFrame)
+                        .rounded()
+                ),
+                0
+            )
+        }
     }
 
     private static func utilizationFactor(

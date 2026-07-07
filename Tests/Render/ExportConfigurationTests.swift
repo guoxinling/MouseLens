@@ -14,6 +14,46 @@ final class ExportConfigurationTests: XCTestCase {
         XCTAssertTrue(configuration.includesClickFeedback)
     }
 
+    func testGIFIsAvailableAndUsesApprovedDefaults() {
+        let configuration = ExportConfiguration.recommended(
+            for: .landscape,
+            format: .gif
+        )
+
+        XCTAssertTrue(ExportFormat.gif.isAvailable)
+        XCTAssertEqual(configuration.format, .gif)
+        XCTAssertEqual(configuration.resolution, .p720)
+        XCTAssertEqual(configuration.frameRate, .fps15)
+        XCTAssertEqual(configuration.quality, .balanced)
+        XCTAssertTrue(configuration.includesCursor)
+        XCTAssertTrue(configuration.includesClickFeedback)
+    }
+
+    func testGIFAllowedResolutionsMatchReleaseScope() {
+        XCTAssertEqual(
+            ExportConfiguration.allowedResolutions(for: .gif),
+            [.p720, .p1080]
+        )
+    }
+
+    func testGIFFixedFrameRateIsFifteenFPS() {
+        XCTAssertEqual(
+            ExportConfiguration.allowedFrameRates(for: .gif),
+            [.fps15]
+        )
+    }
+
+    func testGIFEstimateIncreasesWithResolution() {
+        let low = ExportConfiguration.recommended(for: .landscape, format: .gif)
+        var high = low
+        high.resolution = .p1080
+
+        XCTAssertGreaterThan(
+            ExportSizeEstimator.estimatedByteCount(for: high, aspectRatio: .landscape, duration: 8),
+            ExportSizeEstimator.estimatedByteCount(for: low, aspectRatio: .landscape, duration: 8)
+        )
+    }
+
     func testResolutionPreservesProjectAspect() {
         XCTAssertEqual(
             ExportResolution.p720.renderSize(for: .landscape),
@@ -201,8 +241,4 @@ final class ExportConfigurationTests: XCTestCase {
         )
     }
 
-    func testGIFIsVisibleButUnavailableUntilEncoderLands() {
-        XCTAssertFalse(ExportFormat.gif.isAvailable)
-        XCTAssertTrue(ExportFormat.mp4.isAvailable)
-    }
 }

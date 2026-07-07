@@ -54,6 +54,48 @@ final class ExportConfigurationTests: XCTestCase {
         )
     }
 
+    func testGIFEstimateTreatsPortraitAndLandscape1080pAsSameResolutionClass() {
+        var landscape = ExportConfiguration.recommended(for: .landscape, format: .gif)
+        landscape.resolution = .p1080
+
+        var portrait = ExportConfiguration.recommended(for: .portrait, format: .gif)
+        portrait.resolution = .p1080
+
+        XCTAssertEqual(
+            ExportSizeEstimator.estimatedByteCount(for: landscape, aspectRatio: .landscape, duration: 8),
+            ExportSizeEstimator.estimatedByteCount(for: portrait, aspectRatio: .portrait, duration: 8)
+        )
+    }
+
+    func testInvalidGIFSettingsAreNormalizedToReleaseScope() {
+        var configuration = ExportConfiguration(
+            format: .gif,
+            resolution: .p2160,
+            frameRate: .fps60,
+            quality: .small,
+            includesCursor: false,
+            includesClickFeedback: false
+        )
+
+        XCTAssertEqual(configuration.resolution, .p720)
+        XCTAssertEqual(configuration.frameRate, .fps15)
+        XCTAssertEqual(configuration.quality, .balanced)
+        XCTAssertTrue(configuration.includesCursor)
+        XCTAssertTrue(configuration.includesClickFeedback)
+
+        configuration.resolution = .p1440
+        configuration.frameRate = .fps30
+        configuration.quality = .high
+        configuration.includesCursor = false
+        configuration.includesClickFeedback = false
+
+        XCTAssertEqual(configuration.resolution, .p720)
+        XCTAssertEqual(configuration.frameRate, .fps15)
+        XCTAssertEqual(configuration.quality, .balanced)
+        XCTAssertTrue(configuration.includesCursor)
+        XCTAssertTrue(configuration.includesClickFeedback)
+    }
+
     func testResolutionPreservesProjectAspect() {
         XCTAssertEqual(
             ExportResolution.p720.renderSize(for: .landscape),

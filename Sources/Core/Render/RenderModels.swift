@@ -122,12 +122,41 @@ enum ExportQuality: String, CaseIterable, Equatable {
 }
 
 struct ExportConfiguration: Equatable {
-    var format: ExportFormat
-    var resolution: ExportResolution
-    var frameRate: ExportFrameRate
-    var quality: ExportQuality
-    var includesCursor: Bool
-    var includesClickFeedback: Bool
+    var format: ExportFormat {
+        didSet { normalizeForFormat() }
+    }
+    var resolution: ExportResolution {
+        didSet { normalizeForFormat() }
+    }
+    var frameRate: ExportFrameRate {
+        didSet { normalizeForFormat() }
+    }
+    var quality: ExportQuality {
+        didSet { normalizeForFormat() }
+    }
+    var includesCursor: Bool {
+        didSet { normalizeForFormat() }
+    }
+    var includesClickFeedback: Bool {
+        didSet { normalizeForFormat() }
+    }
+
+    init(
+        format: ExportFormat,
+        resolution: ExportResolution,
+        frameRate: ExportFrameRate,
+        quality: ExportQuality,
+        includesCursor: Bool,
+        includesClickFeedback: Bool
+    ) {
+        self.format = format
+        self.resolution = resolution
+        self.frameRate = frameRate
+        self.quality = quality
+        self.includesCursor = includesCursor
+        self.includesClickFeedback = includesClickFeedback
+        normalizeForFormat()
+    }
 
     static func recommended(
         for aspectRatio: ProjectAspectRatio,
@@ -176,6 +205,29 @@ struct ExportConfiguration: Equatable {
     func renderSize(for aspectRatio: ProjectAspectRatio) -> CGSize {
         resolution.renderSize(for: aspectRatio)
     }
+
+    private mutating func normalizeForFormat() {
+        switch format {
+        case .mp4:
+            break
+        case .gif:
+            if !Self.allowedResolutions(for: .gif).contains(resolution) {
+                resolution = .p720
+            }
+            if frameRate != .fps15 {
+                frameRate = .fps15
+            }
+            if quality != .balanced {
+                quality = .balanced
+            }
+            if includesCursor == false {
+                includesCursor = true
+            }
+            if includesClickFeedback == false {
+                includesClickFeedback = true
+            }
+        }
+    }
 }
 
 enum ExportSizeEstimator {
@@ -216,7 +268,8 @@ enum ExportSizeEstimator {
                 Int((clampedDuration * Double(configuration.frameRate.rawValue)).rounded(.up)),
                 1
             )
-            let bytesPerPixelFrame: CGFloat = renderSize.width >= 1920 ? 0.095 : 0.072
+            let longestSide = max(renderSize.width, renderSize.height)
+            let bytesPerPixelFrame: CGFloat = longestSide >= 1920 ? 0.095 : 0.072
 
             return max(
                 Int64(

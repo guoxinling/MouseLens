@@ -4,6 +4,8 @@ import CoreGraphics
 @preconcurrency import CoreImage
 import CoreVideo
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 enum ExportFormat: String, CaseIterable, Equatable {
     case mp4
@@ -436,6 +438,45 @@ enum VideoRendererError: LocalizedError {
             "MouseLens could not finish writing the exported video."
         case .exportFailed:
             "MouseLens could not finish exporting the processed video."
+        }
+    }
+}
+
+enum GIFFrameEncoder {
+    static func encode(
+        frames: [CGImage],
+        frameDelay: Double,
+        destinationURL: URL
+    ) throws {
+        guard let destination = CGImageDestinationCreateWithURL(
+            destinationURL as CFURL,
+            UTType.gif.identifier as CFString,
+            frames.count,
+            nil
+        ) else {
+            throw VideoRendererError.exportFailed
+        }
+
+        let fileProperties: [CFString: Any] = [
+            kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFLoopCount: 0
+            ]
+        ]
+        CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
+
+        let frameProperties: [CFString: Any] = [
+            kCGImagePropertyGIFDictionary: [
+                kCGImagePropertyGIFUnclampedDelayTime: frameDelay,
+                kCGImagePropertyGIFDelayTime: frameDelay
+            ]
+        ]
+
+        for frame in frames {
+            CGImageDestinationAddImage(destination, frame, frameProperties as CFDictionary)
+        }
+
+        guard CGImageDestinationFinalize(destination) else {
+            throw VideoRendererError.exportFailed
         }
     }
 }
@@ -977,10 +1018,27 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         configuration: ExportConfiguration,
         destinationURL: URL
     ) async throws -> URL {
-        guard configuration.format == .mp4 else {
-            throw VideoRendererError.unsupportedExportFormat
+        switch configuration.format {
+        case .mp4:
+            return try await renderMP4(
+                for: project,
+                configuration: configuration,
+                destinationURL: destinationURL
+            )
+        case .gif:
+            return try await renderGIF(
+                for: project,
+                configuration: configuration,
+                destinationURL: destinationURL
+            )
         }
+    }
 
+    private func renderMP4(
+        for project: RecordingProject,
+        configuration: ExportConfiguration,
+        destinationURL: URL
+    ) async throws -> URL {
         let renderSize = configuration.renderSize(for: project.style.aspectRatio)
         let frameRate = configuration.frameRate.rawValue
         let averageBitRate = configuration.quality.averageBitRate(
@@ -1006,6 +1064,36 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             renderSize: renderSize,
             frameRate: frameRate,
             averageBitRate: averageBitRate,
+            includesCursor: configuration.includesCursor,
+            includesClickFeedback: configuration.includesClickFeedback,
+            destinationURL: destinationURL
+        )
+    }
+
+    private func renderGIF(
+        for project: RecordingProject,
+        configuration: ExportConfiguration,
+        destinationURL: URL
+    ) async throws -> URL {
+        let renderSize = configuration.renderSize(for: project.style.aspectRatio)
+        let frameRate = configuration.frameRate.rawValue
+
+        guard let sourceURL = project.sourceVideoURL, FileManager.default.fileExists(atPath: sourceURL.path) else {
+            return try await renderDebugGIF(
+                for: project,
+                renderSize: renderSize,
+                frameRate: frameRate,
+                includesCursor: configuration.includesCursor,
+                includesClickFeedback: configuration.includesClickFeedback,
+                destinationURL: destinationURL
+            )
+        }
+
+        return try await renderSourceGIF(
+            for: project,
+            sourceURL: sourceURL,
+            renderSize: renderSize,
+            frameRate: frameRate,
             includesCursor: configuration.includesCursor,
             includesClickFeedback: configuration.includesClickFeedback,
             destinationURL: destinationURL
@@ -1186,6 +1274,61 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return destinationURL
     }
 
+    private func renderDebugGIF(
+        for project: RecordingProject,
+        renderSize: CGSize,
+        frameRate: Int32,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        destinationURL: URL
+    ) async throws -> URL {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destinationURL.path) {
+            try fm.removeItem(at: destinationURL)
+        }
+
+        let fps = Double(frameRate)
+        let clipSegments = project.effectiveClipSegments
+        let duration = max(totalDuration(of: clipSegments), 1.0 / fps)
+        let totalFrames = max(Int(ceil(duration * fps)), 1)
+        var frames: [CGImage] = []
+        frames.reserveCapacity(totalFrames)
+
+        for frameIndex in 0..<totalFrames {
+            try Task.checkCancellation()
+
+            let outputTimestamp = min(
+                Double(frameIndex) / fps,
+                max(duration - (1.0 / fps), 0)
+            )
+            let timestamp = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
+            let snapshot = composer.snapshot(
+                at: timestamp,
+                from: project.cameraKeyframes,
+                manualZoomSegments: project.manualZoomSegments,
+                zoomTrackEdited: project.zoomTrackEdited
+            )
+            let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
+            let frame = try makeDebugGIFFrame(
+                size: renderSize,
+                snapshot: snapshot,
+                pointerSnapshot: pointerSnapshot,
+                project: project,
+                includesCursor: includesCursor,
+                includesClickFeedback: includesClickFeedback,
+                timestamp: timestamp
+            )
+            frames.append(frame)
+        }
+
+        try GIFFrameEncoder.encode(
+            frames: frames,
+            frameDelay: 1.0 / fps,
+            destinationURL: destinationURL
+        )
+        return destinationURL
+    }
+
     private func renderSourceVideo(
         for project: RecordingProject,
         sourceURL: URL,
@@ -1237,6 +1380,79 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             renderedVideoURL: renderedVideoURL,
             destinationURL: destinationURL
         )
+    }
+
+    private func renderSourceGIF(
+        for project: RecordingProject,
+        sourceURL: URL,
+        renderSize: CGSize,
+        frameRate: Int32,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        destinationURL: URL
+    ) async throws -> URL {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destinationURL.path) {
+            try fm.removeItem(at: destinationURL)
+        }
+
+        let asset = AVURLAsset(url: sourceURL)
+        let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
+        let assetDuration = try await asset.load(.duration)
+        let sourceDuration = max(CMTimeGetSeconds(assetDuration), 0)
+        let clipSegments = RecordingProject.normalizedClipSegments(project.effectiveClipSegments, duration: sourceDuration)
+        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(frameRate))
+        let totalFrames = max(Int(ceil(safeDuration * Double(frameRate))), 1)
+
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = renderSize
+        generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
+        generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
+
+        var frames: [CGImage] = []
+        frames.reserveCapacity(totalFrames)
+
+        for frameIndex in 0..<totalFrames {
+            try Task.checkCancellation()
+
+            let outputTimestamp = min(
+                Double(frameIndex) / Double(frameRate),
+                max(safeDuration - (1.0 / Double(frameRate)), 0)
+            )
+            let seconds = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
+            let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
+            try Task.checkCancellation()
+
+            let frame = try autoreleasepool {
+                let sourceImage = CIImage(cgImage: sourceFrame)
+                let snapshot = composer.snapshot(
+                    at: seconds,
+                    from: project.cameraKeyframes,
+                    manualZoomSegments: project.manualZoomSegments,
+                    zoomTrackEdited: project.zoomTrackEdited
+                )
+                let pointerSnapshot = pointerTimeline.snapshot(at: seconds, from: project.events, smoothing: .raw)
+                return try makeGIFFrame(
+                    from: sourceImage,
+                    snapshot: snapshot,
+                    pointerSnapshot: pointerSnapshot,
+                    project: project,
+                    preparedAssets: preparedAssets,
+                    includesCursor: includesCursor,
+                    includesClickFeedback: includesClickFeedback
+                )
+            }
+            frames.append(frame)
+        }
+
+        try GIFFrameEncoder.encode(
+            frames: frames,
+            frameDelay: 1.0 / Double(frameRate),
+            destinationURL: destinationURL
+        )
+        return destinationURL
     }
 
     private func renderFixedFrameVideo(
@@ -1666,6 +1882,31 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return withCursor.composited(over: preparedAssets.backgroundImage)
     }
 
+    private func makeGIFFrame(
+        from sourceImage: CIImage,
+        snapshot: FrameSnapshot,
+        pointerSnapshot: PointerSnapshot?,
+        project: RecordingProject,
+        preparedAssets: PreparedRenderAssets,
+        includesCursor: Bool,
+        includesClickFeedback: Bool
+    ) throws -> CGImage {
+        let frameImage = composeFrame(
+            from: sourceImage,
+            snapshot: snapshot,
+            pointerSnapshot: pointerSnapshot,
+            project: project,
+            preparedAssets: preparedAssets,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback
+        )
+
+        guard let cgImage = ciContext.createCGImage(frameImage, from: preparedAssets.layout.fullRect) else {
+            throw VideoRendererError.exportFailed
+        }
+        return cgImage
+    }
+
     private func coreImageRect(fromTopOriginRect rect: CGRect, in fullRect: CGRect) -> CGRect {
         CGRect(
             x: rect.minX,
@@ -1973,6 +2214,44 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return CIImage(cgImage: image)
     }
 
+    private func makeDebugGIFFrame(
+        size: CGSize,
+        snapshot: FrameSnapshot,
+        pointerSnapshot: PointerSnapshot?,
+        project: RecordingProject,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        timestamp: TimeInterval
+    ) throws -> CGImage {
+        guard let context = CGContext(
+            data: nil,
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw VideoRendererError.unableToCreateContext
+        }
+
+        drawDebugFrame(
+            in: context,
+            size: size,
+            snapshot: snapshot,
+            pointerSnapshot: pointerSnapshot,
+            project: project,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback,
+            timestamp: timestamp
+        )
+
+        guard let image = context.makeImage() else {
+            throw VideoRendererError.unableToCreateContext
+        }
+        return image
+    }
+
     private func drawDebugFrame(
         in buffer: CVPixelBuffer,
         size: CGSize,
@@ -2001,6 +2280,28 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             return
         }
 
+        drawDebugFrame(
+            in: context,
+            size: size,
+            snapshot: snapshot,
+            pointerSnapshot: pointerSnapshot,
+            project: project,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback,
+            timestamp: timestamp
+        )
+    }
+
+    private func drawDebugFrame(
+        in context: CGContext,
+        size: CGSize,
+        snapshot: FrameSnapshot,
+        pointerSnapshot: PointerSnapshot?,
+        project: RecordingProject,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        timestamp: TimeInterval
+    ) {
         context.translateBy(x: 0, y: size.height)
         context.scaleBy(x: 1, y: -1)
 
@@ -2067,7 +2368,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             ),
             contentRect: CGRect(origin: .zero, size: size)
         )
-        ciContext.draw(background, in: CGRect(origin: .zero, size: size), from: CGRect(origin: .zero, size: size))
+        let rect = CGRect(origin: .zero, size: size)
+        guard let cgImage = ciContext.createCGImage(background, from: rect) else { return }
+        context.draw(cgImage, in: rect)
     }
 
     private func drawDebugGrid(in context: CGContext, rect: CGRect) {

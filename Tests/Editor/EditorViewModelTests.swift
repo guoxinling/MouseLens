@@ -236,6 +236,7 @@ final class EditorViewModelTests: XCTestCase {
         let selectedURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
+        let expectedURL = selectedURL.deletingPathExtension().appendingPathExtension("gif")
         let viewModel = makeViewModel { _, configuration in
             capturedPanelConfiguration = configuration
             return selectedURL
@@ -248,15 +249,16 @@ final class EditorViewModelTests: XCTestCase {
 
         await viewModel.export()
 
-        guard case .failed(let message) = viewModel.exportState else {
-            return XCTFail("Expected GIF export to fail in the renderer until Task 4 lands.")
+        guard case .finished(let exportedURL) = viewModel.exportState else {
+            return XCTFail("Expected GIF export to finish through the renderer path.")
         }
 
         XCTAssertEqual(capturedPanelConfiguration?.allowedContentTypes, [.gif])
         XCTAssertEqual(capturedPanelConfiguration?.requiredPathExtension, "gif")
-        XCTAssertFalse(message.isEmpty)
-        XCTAssertNil(viewModel.exportURL)
-        XCTAssertFalse(viewModel.showExportSheet)
+        XCTAssertEqual(exportedURL, expectedURL)
+        XCTAssertEqual(viewModel.exportURL, expectedURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: expectedURL.path))
+        XCTAssertTrue(viewModel.showExportSheet)
     }
 
     func testHigherResolutionAndFrameRateIncreaseEstimate() {

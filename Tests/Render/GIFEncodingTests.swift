@@ -26,10 +26,14 @@ final class GIFEncodingTests: XCTestCase {
         }
 
         XCTAssertEqual(CGImageSourceGetCount(source), 2)
+        let fileProperties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
+        let fileGIFProperties = fileProperties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let gifProperties = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+        let loopCount = fileGIFProperties?[kCGImagePropertyGIFLoopCount] as? Int
         let delay = gifProperties?[kCGImagePropertyGIFUnclampedDelayTime] as? Double
         let expectedDelay = (1.0 / 15.0 * 100).rounded() / 100
+        XCTAssertEqual(loopCount, 0)
         XCTAssertNotNil(delay)
         XCTAssertEqual(delay ?? 0, expectedDelay, accuracy: 0.0001)
     }

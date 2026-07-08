@@ -981,11 +981,29 @@ private struct PreparedRenderAssets {
     let transparentCanvas: CIImage
 }
 
+private struct RenderFrameTiming {
+    let presentationTime: CMTime
+    let timestamp: TimeInterval
+}
+
+private struct ComposedSourceFrame {
+    let presentationTime: CMTime
+    let image: CIImage
+}
+
 private final class ExportSessionBox: @unchecked Sendable {
     let session: AVAssetExportSession
 
     init(session: AVAssetExportSession) {
         self.session = session
+    }
+}
+
+private final class AssetWriterBox: @unchecked Sendable {
+    let writer: AVAssetWriter
+
+    init(writer: AVAssetWriter) {
+        self.writer = writer
     }
 }
 
@@ -1261,12 +1279,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         input.markAsFinished()
 
+        let writerBox = AssetWriterBox(writer: writer)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writer.finishWriting {
-                if writer.status == .completed {
+            writerBox.writer.finishWriting {
+                if writerBox.writer.status == .completed {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: writer.error ?? VideoRendererError.writerFailed)
+                    continuation.resume(throwing: writerBox.writer.error ?? VideoRendererError.writerFailed)
                 }
             }
         }
@@ -1398,53 +1417,25 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         let asset = AVURLAsset(url: sourceURL)
         let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
-        let assetDuration = try await asset.load(.duration)
-        let sourceDuration = max(CMTimeGetSeconds(assetDuration), 0)
-        let clipSegments = RecordingProject.normalizedClipSegments(project.effectiveClipSegments, duration: sourceDuration)
-        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(frameRate))
-        let totalFrames = max(Int(ceil(safeDuration * Double(frameRate))), 1)
-
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = renderSize
-        generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
-        generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
 
         var frames: [CGImage] = []
-        frames.reserveCapacity(totalFrames)
-
-        for frameIndex in 0..<totalFrames {
-            try Task.checkCancellation()
-
-            let outputTimestamp = min(
-                Double(frameIndex) / Double(frameRate),
-                max(safeDuration - (1.0 / Double(frameRate)), 0)
-            )
-            let seconds = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
-            let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
-            let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
-            try Task.checkCancellation()
-
-            let frame = try autoreleasepool {
-                let sourceImage = CIImage(cgImage: sourceFrame)
-                let snapshot = composer.snapshot(
-                    at: seconds,
-                    from: project.cameraKeyframes,
-                    manualZoomSegments: project.manualZoomSegments,
-                    zoomTrackEdited: project.zoomTrackEdited
-                )
-                let pointerSnapshot = pointerTimeline.snapshot(at: seconds, from: project.events, smoothing: .raw)
-                return try makeGIFFrame(
-                    from: sourceImage,
-                    snapshot: snapshot,
-                    pointerSnapshot: pointerSnapshot,
-                    project: project,
-                    preparedAssets: preparedAssets,
-                    includesCursor: includesCursor,
-                    includesClickFeedback: includesClickFeedback
-                )
+        do {
+            try await renderSourceFrames(
+                for: project,
+                sourceAsset: asset,
+                preparedAssets: preparedAssets,
+                renderSize: renderSize,
+                frameRate: frameRate,
+                includesCursor: includesCursor,
+                includesClickFeedback: includesClickFeedback
+            ) { frame in
+                guard let cgImage = ciContext.createCGImage(frame.image, from: preparedAssets.layout.fullRect) else {
+                    throw VideoRendererError.exportFailed
+                }
+                frames.append(cgImage)
             }
-            frames.append(frame)
+        } catch {
+            throw normalizedRenderError(error, for: sourceURL)
         }
 
         try GIFFrameEncoder.encode(
@@ -1501,12 +1492,54 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
+        try await renderSourceFrames(
+            for: project,
+            sourceAsset: sourceAsset,
+            preparedAssets: preparedAssets,
+            renderSize: renderSize,
+            frameRate: frameRate,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback
+        ) { frame in
+            while !input.isReadyForMoreMediaData {
+                try Task.checkCancellation()
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+
+            guard let buffer = makePixelBuffer(from: adaptor, size: renderSize) else {
+                throw VideoRendererError.unableToCreatePixelBuffer
+            }
+
+            ciContext.render(
+                frame.image,
+                to: buffer,
+                bounds: preparedAssets.layout.fullRect,
+                colorSpace: renderColorSpace
+            )
+
+            guard adaptor.append(buffer, withPresentationTime: frame.presentationTime) else {
+                throw writer.error ?? VideoRendererError.writerFailed
+            }
+        }
+
+        input.markAsFinished()
+        try await finishWriting(writer)
+        return destinationURL
+    }
+
+    private func renderSourceFrames(
+        for project: RecordingProject,
+        sourceAsset: AVURLAsset,
+        preparedAssets: PreparedRenderAssets,
+        renderSize: CGSize,
+        frameRate: Int32,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        consumeFrame: (ComposedSourceFrame) async throws -> Void
+    ) async throws {
         let assetDuration = try await sourceAsset.load(.duration)
         let sourceDuration = max(CMTimeGetSeconds(assetDuration), 0)
         let clipSegments = RecordingProject.normalizedClipSegments(project.effectiveClipSegments, duration: sourceDuration)
-        let safeDuration = max(totalDuration(of: clipSegments), 1.0 / Double(frameRate))
-        let totalFrames = max(Int(ceil(safeDuration * Double(frameRate))), 1)
-        let frameDuration = CMTime(value: 1, timescale: frameRate)
 
         let generator = AVAssetImageGenerator(asset: sourceAsset)
         generator.appliesPreferredTrackTransform = true
@@ -1516,63 +1549,54 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
         generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
 
-        for frameIndex in 0..<totalFrames {
-            try Task.checkCancellation()
-
-            while !input.isReadyForMoreMediaData {
-                try Task.checkCancellation()
-                try await Task.sleep(nanoseconds: 2_000_000)
-            }
-
-            let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
-            let outputTimestamp = min(
-                Double(frameIndex) / Double(frameRate),
-                max(safeDuration - (1.0 / Double(frameRate)), 0)
-            )
-            let seconds = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
-            let sourceTime = CMTime(seconds: seconds, preferredTimescale: 600)
+        try await forEachRenderFrameTiming(in: clipSegments, frameRate: frameRate) { timing in
+            let sourceTime = CMTime(seconds: timing.timestamp, preferredTimescale: 600)
             let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
             try Task.checkCancellation()
 
-            try autoreleasepool {
-                let sourceImage = CIImage(cgImage: sourceFrame)
-                let snapshot = composer.snapshot(
-                    at: seconds,
-                    from: project.cameraKeyframes,
-                    manualZoomSegments: project.manualZoomSegments,
-                    zoomTrackEdited: project.zoomTrackEdited
-                )
-                let pointerSnapshot = pointerTimeline.snapshot(at: seconds, from: project.events, smoothing: .raw)
-                let composedFrame = composeFrame(
-                    from: sourceImage,
-                    snapshot: snapshot,
-                    pointerSnapshot: pointerSnapshot,
+            let composedFrame = try autoreleasepool {
+                try makeComposedSourceFrame(
+                    from: sourceFrame,
+                    at: timing.timestamp,
                     project: project,
                     preparedAssets: preparedAssets,
                     includesCursor: includesCursor,
                     includesClickFeedback: includesClickFeedback
                 )
-
-                guard let buffer = makePixelBuffer(from: adaptor, size: renderSize) else {
-                    throw VideoRendererError.unableToCreatePixelBuffer
-                }
-
-                ciContext.render(
-                    composedFrame.cropped(to: preparedAssets.layout.fullRect),
-                    to: buffer,
-                    bounds: preparedAssets.layout.fullRect,
-                    colorSpace: renderColorSpace
-                )
-
-                guard adaptor.append(buffer, withPresentationTime: presentationTime) else {
-                    throw writer.error ?? VideoRendererError.writerFailed
-                }
             }
+            try await consumeFrame(
+                ComposedSourceFrame(
+                    presentationTime: timing.presentationTime,
+                    image: composedFrame
+                )
+            )
         }
+    }
 
-        input.markAsFinished()
-        try await finishWriting(writer)
-        return destinationURL
+    private func forEachRenderFrameTiming(
+        in clipSegments: [ProjectTrimRange],
+        frameRate: Int32,
+        body: (RenderFrameTiming) async throws -> Void
+    ) async throws {
+        let safeFrameRate = max(frameRate, 1)
+        let fps = Double(safeFrameRate)
+        let duration = max(totalDuration(of: clipSegments), 1.0 / fps)
+        let totalFrames = max(Int(ceil(duration * fps)), 1)
+        let frameDuration = CMTime(value: 1, timescale: safeFrameRate)
+
+        for frameIndex in 0..<totalFrames {
+            try Task.checkCancellation()
+
+            let outputTimestamp = min(
+                Double(frameIndex) / fps,
+                max(duration - (1.0 / fps), 0)
+            )
+            let timing = RenderFrameTiming(
+                presentationTime: CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex)),
+                timestamp: sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
+            )
+            try await body(timing)
+        }
     }
 
     private func generateSourceFrame(from generator: AVAssetImageGenerator, at time: CMTime) async throws -> CGImage {
@@ -1699,12 +1723,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     }
 
     private func finishWriting(_ writer: AVAssetWriter) async throws {
+        let writerBox = AssetWriterBox(writer: writer)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writer.finishWriting {
-                if writer.status == .completed {
+            writerBox.writer.finishWriting {
+                if writerBox.writer.status == .completed {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: writer.error ?? VideoRendererError.writerFailed)
+                    continuation.resume(throwing: writerBox.writer.error ?? VideoRendererError.writerFailed)
                 }
             }
         }
@@ -1882,16 +1907,24 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return withCursor.composited(over: preparedAssets.backgroundImage)
     }
 
-    private func makeGIFFrame(
-        from sourceImage: CIImage,
-        snapshot: FrameSnapshot,
-        pointerSnapshot: PointerSnapshot?,
+    private func makeComposedSourceFrame(
+        from sourceFrame: CGImage,
+        at timestamp: TimeInterval,
         project: RecordingProject,
         preparedAssets: PreparedRenderAssets,
         includesCursor: Bool,
         includesClickFeedback: Bool
-    ) throws -> CGImage {
-        let frameImage = composeFrame(
+    ) throws -> CIImage {
+        let sourceImage = CIImage(cgImage: sourceFrame)
+        let snapshot = composer.snapshot(
+            at: timestamp,
+            from: project.cameraKeyframes,
+            manualZoomSegments: project.manualZoomSegments,
+            zoomTrackEdited: project.zoomTrackEdited
+        )
+        let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
+
+        return composeFrame(
             from: sourceImage,
             snapshot: snapshot,
             pointerSnapshot: pointerSnapshot,
@@ -1900,11 +1933,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             includesCursor: includesCursor,
             includesClickFeedback: includesClickFeedback
         )
-
-        guard let cgImage = ciContext.createCGImage(frameImage, from: preparedAssets.layout.fullRect) else {
-            throw VideoRendererError.exportFailed
-        }
-        return cgImage
+        .cropped(to: preparedAssets.layout.fullRect)
     }
 
     private func coreImageRect(fromTopOriginRect rect: CGRect, in fullRect: CGRect) -> CGRect {

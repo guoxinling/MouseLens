@@ -2,6 +2,11 @@ import XCTest
 @testable import MouseLens
 
 final class ExportFilenameTests: XCTestCase {
+    func testExportFormatUsesMatchingFileExtension() {
+        XCTAssertEqual(ExportFormat.mp4.fileExtension, "mp4")
+        XCTAssertEqual(ExportFormat.gif.fileExtension, "gif")
+    }
+
     func testExportFilenameSanitizesProjectName() {
         let project = RecordingProject(
             id: UUID(),

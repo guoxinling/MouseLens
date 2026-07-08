@@ -4,6 +4,14 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class EditorViewModel: ObservableObject {
+    struct ExportSavePanelConfiguration: Equatable {
+        let title: String
+        let message: String
+        let allowedContentTypes: [UTType]
+        let defaultFilename: String
+        let requiredPathExtension: String
+    }
+
     @Published private(set) var project: RecordingProject?
     @Published var zoomLevel = 0.54 {
         didSet { handleStyleChange(updateExportPreset: false) }
@@ -49,7 +57,7 @@ final class EditorViewModel: ObservableObject {
     private let cameraPlanEngine: CameraPlanEngine
     private let projectStore: ProjectStore
     private let preferencesStore: AppPreferencesStore
-    private let exportSavePanelURLProvider: ((RecordingProject, ExportConfiguration) -> URL?)?
+    private let exportSavePanelSelection: ((RecordingProject, ExportSavePanelConfiguration) -> URL?)?
     private let baseZoom = 1.0
     private let clickDuration = 0.6
     private let gifWarningDurationThreshold = 12.0
@@ -70,14 +78,14 @@ final class EditorViewModel: ObservableObject {
         cameraPlanEngine: CameraPlanEngine,
         projectStore: ProjectStore,
         preferencesStore: AppPreferencesStore,
-        exportSavePanelURLProvider: ((RecordingProject, ExportConfiguration) -> URL?)? = nil
+        exportSavePanelSelection: ((RecordingProject, ExportSavePanelConfiguration) -> URL?)? = nil
     ) {
         self.exportCoordinator = exportCoordinator
         self.previewRenderer = previewRenderer
         self.cameraPlanEngine = cameraPlanEngine
         self.projectStore = projectStore
         self.preferencesStore = preferencesStore
-        self.exportSavePanelURLProvider = exportSavePanelURLProvider
+        self.exportSavePanelSelection = exportSavePanelSelection
     }
 
     deinit {
@@ -159,40 +167,72 @@ final class EditorViewModel: ObservableObject {
         for project: RecordingProject,
         configuration: ExportConfiguration
     ) -> URL? {
-        if let exportSavePanelURLProvider {
-            return exportSavePanelURLProvider(project, configuration)
-        }
+        let panelConfiguration = Self.exportSavePanelConfiguration(for: project, configuration: configuration)
 
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        panel.nameFieldStringValue = ExportCoordinator.exportFilename(
-            for: project,
-            configuration: configuration
-        )
+        panel.title = panelConfiguration.title
+        panel.message = panelConfiguration.message
+        panel.nameFieldStringValue = panelConfiguration.defaultFilename
+        panel.allowedContentTypes = panelConfiguration.allowedContentTypes
         panel.directoryURL = defaultExportDirectoryURL()
 
-        let requiredPathExtension: String
-        switch configuration.format {
-        case .mp4:
-            panel.title = "Export MP4"
-            panel.message = "Choose where MouseLens should save the exported video."
-            panel.allowedContentTypes = [.mpeg4Movie]
-            requiredPathExtension = "mp4"
-        case .gif:
-            panel.title = "Export GIF"
-            panel.message = "Choose where MouseLens should save the exported GIF."
-            panel.allowedContentTypes = [.gif]
-            requiredPathExtension = "gif"
+        let selectedURL: URL?
+        if let exportSavePanelSelection {
+            selectedURL = exportSavePanelSelection(project, panelConfiguration)
+        } else if panel.runModal() == .OK {
+            selectedURL = panel.url
+        } else {
+            selectedURL = nil
         }
 
-        guard panel.runModal() == .OK, let url = panel.url else {
+        guard let selectedURL else {
             return nil
         }
 
-        return url.pathExtension.lowercased() == requiredPathExtension
-            ? url
-            : url.appendingPathExtension(requiredPathExtension)
+        return Self.normalizedExportDestinationURL(
+            selectedURL,
+            requiredPathExtension: panelConfiguration.requiredPathExtension
+        )
+    }
+
+    static func exportSavePanelConfiguration(
+        for project: RecordingProject,
+        configuration: ExportConfiguration
+    ) -> ExportSavePanelConfiguration {
+        let defaultFilename = ExportCoordinator.exportFilename(for: project, configuration: configuration)
+
+        switch configuration.format {
+        case .mp4:
+            return ExportSavePanelConfiguration(
+                title: "Export MP4",
+                message: "Choose where MouseLens should save the exported video.",
+                allowedContentTypes: [.mpeg4Movie],
+                defaultFilename: defaultFilename,
+                requiredPathExtension: ExportFormat.mp4.fileExtension
+            )
+        case .gif:
+            return ExportSavePanelConfiguration(
+                title: "Export GIF",
+                message: "Choose where MouseLens should save the exported GIF.",
+                allowedContentTypes: [.gif],
+                defaultFilename: defaultFilename,
+                requiredPathExtension: ExportFormat.gif.fileExtension
+            )
+        }
+    }
+
+    static func normalizedExportDestinationURL(
+        _ selectedURL: URL,
+        requiredPathExtension: String
+    ) -> URL {
+        guard selectedURL.pathExtension.lowercased() != requiredPathExtension.lowercased() else {
+            return selectedURL
+        }
+
+        let baseURL = selectedURL.pathExtension.isEmpty ? selectedURL : selectedURL.deletingPathExtension()
+        return baseURL.appendingPathExtension(requiredPathExtension)
     }
 
     var exportButtonLabel: String {

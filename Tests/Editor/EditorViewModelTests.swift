@@ -171,14 +171,80 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.exportConfiguration.includesClickFeedback)
     }
 
+    func testMP4SavePanelConfigurationUsesVideoMetadata() {
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+        let configuration = ExportConfiguration.recommended(for: .landscape)
+
+        let panelConfiguration = EditorViewModel.exportSavePanelConfiguration(
+            for: project,
+            configuration: configuration
+        )
+
+        XCTAssertEqual(panelConfiguration.title, "Export MP4")
+        XCTAssertEqual(panelConfiguration.message, "Choose where MouseLens should save the exported video.")
+        XCTAssertEqual(panelConfiguration.allowedContentTypes, [.mpeg4Movie])
+        XCTAssertEqual(panelConfiguration.requiredPathExtension, "mp4")
+        XCTAssertEqual(
+            panelConfiguration.defaultFilename,
+            ExportCoordinator.exportFilename(for: project, configuration: configuration)
+        )
+    }
+
+    func testGIFSavePanelConfigurationUsesGIFMetadata() {
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+        let configuration = ExportConfiguration.recommended(for: .landscape, format: .gif)
+
+        let panelConfiguration = EditorViewModel.exportSavePanelConfiguration(
+            for: project,
+            configuration: configuration
+        )
+
+        XCTAssertEqual(panelConfiguration.title, "Export GIF")
+        XCTAssertEqual(panelConfiguration.message, "Choose where MouseLens should save the exported GIF.")
+        XCTAssertEqual(panelConfiguration.allowedContentTypes, [.gif])
+        XCTAssertEqual(panelConfiguration.requiredPathExtension, "gif")
+        XCTAssertEqual(
+            panelConfiguration.defaultFilename,
+            ExportCoordinator.exportFilename(for: project, configuration: configuration)
+        )
+    }
+
+    func testSavePanelNormalizationReplacesMismatchedExtension() {
+        let selectedURL = URL(fileURLWithPath: "/tmp/MouseLens Export.mp4")
+
+        let normalizedURL = EditorViewModel.normalizedExportDestinationURL(
+            selectedURL,
+            requiredPathExtension: "gif"
+        )
+
+        XCTAssertEqual(normalizedURL.lastPathComponent, "MouseLens Export.gif")
+    }
+
+    func testSavePanelNormalizationAppendsMissingExtension() {
+        let selectedURL = URL(fileURLWithPath: "/tmp/MouseLens Export")
+
+        let normalizedURL = EditorViewModel.normalizedExportDestinationURL(
+            selectedURL,
+            requiredPathExtension: "mp4"
+        )
+
+        XCTAssertEqual(normalizedURL.lastPathComponent, "MouseLens Export.mp4")
+    }
+
     func testGIFExportUsesRendererPathWhenSelected() async {
-        let destinationURL = FileManager.default.temporaryDirectory
+        var capturedPanelConfiguration: EditorViewModel.ExportSavePanelConfiguration?
+        let selectedURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("gif")
-        let viewModel = makeViewModel(exportSavePanelURL: destinationURL)
+            .appendingPathExtension("mp4")
+        let viewModel = makeViewModel { _, configuration in
+            capturedPanelConfiguration = configuration
+            return selectedURL
+        }
         viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
 
         viewModel.updateExportFormat(.gif)
+
+        XCTAssertTrue(viewModel.canExportSelectedFormat)
 
         await viewModel.export()
 
@@ -186,8 +252,11 @@ final class EditorViewModelTests: XCTestCase {
             return XCTFail("Expected GIF export to fail in the renderer until Task 4 lands.")
         }
 
-        XCTAssertTrue(message.contains("This export format is not available yet."))
-        XCTAssertNotEqual(message, "This export format is not available yet.")
+        XCTAssertEqual(capturedPanelConfiguration?.allowedContentTypes, [.gif])
+        XCTAssertEqual(capturedPanelConfiguration?.requiredPathExtension, "gif")
+        XCTAssertFalse(message.isEmpty)
+        XCTAssertNil(viewModel.exportURL)
+        XCTAssertFalse(viewModel.showExportSheet)
     }
 
     func testHigherResolutionAndFrameRateIncreaseEstimate() {
@@ -788,7 +857,9 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(normalized[0].location.y, 0.5, accuracy: 0.0001)
     }
 
-    private func makeViewModel(exportSavePanelURL: URL? = nil) -> EditorViewModel {
+    private func makeViewModel(
+        exportSavePanelSelection: ((RecordingProject, EditorViewModel.ExportSavePanelConfiguration) -> URL?)? = nil
+    ) -> EditorViewModel {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ProjectStore(rootDirectoryURL: directory)
         let coordinator = ExportCoordinator(renderer: VideoRenderer(), projectStore: store)
@@ -798,7 +869,7 @@ final class EditorViewModelTests: XCTestCase {
             cameraPlanEngine: CameraPlanEngine(),
             projectStore: store,
             preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
-            exportSavePanelURLProvider: { _, _ in exportSavePanelURL }
+            exportSavePanelSelection: exportSavePanelSelection
         )
     }
 

@@ -991,6 +991,11 @@ private struct ComposedSourceFrame {
     let image: CIImage
 }
 
+private struct DebugRenderedFrame {
+    let presentationTime: CMTime
+    let image: CGImage
+}
+
 private final class ExportSessionBox: @unchecked Sendable {
     let session: AVAssetExportSession
 
@@ -1234,46 +1239,31 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
-
-        let fps = frameRate
-        let clipSegments = project.effectiveClipSegments
-        let duration = max(totalDuration(of: clipSegments), 1.0 / Double(fps))
-        let totalFrames = max(Int(ceil(duration * Double(fps))), 1)
-        let frameDuration = CMTime(value: 1, timescale: fps)
-
-        for frameIndex in 0..<totalFrames {
-            try Task.checkCancellation()
-
+        try await renderDebugFrames(
+            for: project,
+            renderSize: renderSize,
+            frameRate: frameRate,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback
+        ) { frame in
             while !input.isReadyForMoreMediaData {
                 try Task.checkCancellation()
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
 
-            autoreleasepool {
-                let presentationTime = CMTimeMultiply(frameDuration, multiplier: Int32(frameIndex))
-                let outputTimestamp = min(Double(frameIndex) / Double(fps), max(duration - (1.0 / Double(fps)), 0))
-                let timestamp = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
-                let snapshot = composer.snapshot(
-                    at: timestamp,
-                    from: project.cameraKeyframes,
-                    manualZoomSegments: project.manualZoomSegments,
-                    zoomTrackEdited: project.zoomTrackEdited
-                )
-                let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
+            guard let buffer = makePixelBuffer(from: adaptor, size: size) else {
+                throw VideoRendererError.unableToCreatePixelBuffer
+            }
 
-                if let buffer = makePixelBuffer(from: adaptor, size: size) {
-                    drawDebugFrame(
-                        in: buffer,
-                        size: size,
-                        snapshot: snapshot,
-                        pointerSnapshot: pointerSnapshot,
-                        project: project,
-                        includesCursor: includesCursor,
-                        includesClickFeedback: includesClickFeedback,
-                        timestamp: timestamp
-                    )
-                    adaptor.append(buffer, withPresentationTime: presentationTime)
-                }
+            ciContext.render(
+                CIImage(cgImage: frame.image),
+                to: buffer,
+                bounds: CGRect(origin: .zero, size: renderSize),
+                colorSpace: renderColorSpace
+            )
+
+            guard adaptor.append(buffer, withPresentationTime: frame.presentationTime) else {
+                throw writer.error ?? VideoRendererError.writerFailed
             }
         }
 
@@ -1306,43 +1296,20 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             try fm.removeItem(at: destinationURL)
         }
 
-        let fps = Double(frameRate)
-        let clipSegments = project.effectiveClipSegments
-        let duration = max(totalDuration(of: clipSegments), 1.0 / fps)
-        let totalFrames = max(Int(ceil(duration * fps)), 1)
         var frames: [CGImage] = []
-        frames.reserveCapacity(totalFrames)
-
-        for frameIndex in 0..<totalFrames {
-            try Task.checkCancellation()
-
-            let outputTimestamp = min(
-                Double(frameIndex) / fps,
-                max(duration - (1.0 / fps), 0)
-            )
-            let timestamp = sourceTimestamp(atClipOffset: outputTimestamp, in: clipSegments)
-            let snapshot = composer.snapshot(
-                at: timestamp,
-                from: project.cameraKeyframes,
-                manualZoomSegments: project.manualZoomSegments,
-                zoomTrackEdited: project.zoomTrackEdited
-            )
-            let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
-            let frame = try makeDebugGIFFrame(
-                size: renderSize,
-                snapshot: snapshot,
-                pointerSnapshot: pointerSnapshot,
-                project: project,
-                includesCursor: includesCursor,
-                includesClickFeedback: includesClickFeedback,
-                timestamp: timestamp
-            )
-            frames.append(frame)
+        try await renderDebugFrames(
+            for: project,
+            renderSize: renderSize,
+            frameRate: frameRate,
+            includesCursor: includesCursor,
+            includesClickFeedback: includesClickFeedback
+        ) { frame in
+            frames.append(frame.image)
         }
 
         try GIFFrameEncoder.encode(
             frames: frames,
-            frameDelay: 1.0 / fps,
+            frameDelay: 1.0 / Double(frameRate),
             destinationURL: destinationURL
         )
         return destinationURL
@@ -1568,6 +1535,44 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                 ComposedSourceFrame(
                     presentationTime: timing.presentationTime,
                     image: composedFrame
+                )
+            )
+        }
+    }
+
+    private func renderDebugFrames(
+        for project: RecordingProject,
+        renderSize: CGSize,
+        frameRate: Int32,
+        includesCursor: Bool,
+        includesClickFeedback: Bool,
+        consumeFrame: (DebugRenderedFrame) async throws -> Void
+    ) async throws {
+        try await forEachRenderFrameTiming(in: project.effectiveClipSegments, frameRate: frameRate) { timing in
+            let snapshot = composer.snapshot(
+                at: timing.timestamp,
+                from: project.cameraKeyframes,
+                manualZoomSegments: project.manualZoomSegments,
+                zoomTrackEdited: project.zoomTrackEdited
+            )
+            let pointerSnapshot = pointerTimeline.snapshot(
+                at: timing.timestamp,
+                from: project.events,
+                smoothing: .raw
+            )
+            let image = try makeDebugGIFFrame(
+                size: renderSize,
+                snapshot: snapshot,
+                pointerSnapshot: pointerSnapshot,
+                project: project,
+                includesCursor: includesCursor,
+                includesClickFeedback: includesClickFeedback,
+                timestamp: timing.timestamp
+            )
+            try await consumeFrame(
+                DebugRenderedFrame(
+                    presentationTime: timing.presentationTime,
+                    image: image
                 )
             )
         }

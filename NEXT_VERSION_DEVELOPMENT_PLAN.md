@@ -297,18 +297,14 @@ Add GIF export for short clips.
 
 Supported presets:
 
-- GIF 480p, 15 fps, balanced quality.
-- GIF 720p, 15 fps, balanced quality.
-
-Optional if easy:
-
-- 10 fps small file preset.
-- 24 fps smooth preset.
+- GIF 720p, 15 fps, balanced quality by default.
+- GIF 1080p, 15 fps, balanced quality as the only higher-resolution option.
 
 #### Product Rules
 
 - GIF export uses the active trim range.
 - GIF export includes current background, padding, rounded corners, cursor, click feedback, and zoom.
+- GIF export does not include audio.
 - If the selected range is longer than 30 seconds, show a size/performance warning.
 - Default GIF export should favor reasonable file size over maximum quality.
 
@@ -332,7 +328,7 @@ Do not block 1.1 on advanced GIF compression.
 The export panel should treat GIF as a first-class preset:
 
 - Preset card: `GIF`.
-- Description: `Up to 480p` or selected resolution.
+- Description: `720p / 15 fps default` with optional `1080p / 15 fps`.
 - Button text: `Export GIF`.
 - Estimated size shown when feasible.
 

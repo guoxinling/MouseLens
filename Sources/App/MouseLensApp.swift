@@ -28,17 +28,16 @@ struct MouseLensApp: App {
             )
         )
 
+        environment.windowController.onCaptureSetupPanelDismissed = {
+            coordinator.dismissFloatingHomeToolbar()
+        }
+
         MouseLensAppDelegate.openCaptureToolbarHandler = {
             if coordinator.activeProject != nil {
-                environment.windowController.activateAppWindow()
+                environment.windowController.activateAppWindow(forceAppActivation: true)
                 return
             }
-            environment.windowController.showCaptureSetupPanel {
-                HomeView(
-                    viewModel: homeViewModel,
-                    onProjectReady: { coordinator.open(project: $0) }
-                )
-            }
+            coordinator.presentFloatingHomeToolbar()
         }
     }
 
@@ -170,23 +169,18 @@ private struct MenuBarCaptureView: View {
 
         if coordinator.activeProject != nil {
             Button("Open Editor") {
-                windowController.activateAppWindow()
+                windowController.activateAppWindow(forceAppActivation: true)
             }
         } else {
             Button("Open Capture Toolbar") {
-                windowController.showCaptureSetupPanel {
-                    HomeView(
-                        viewModel: viewModel,
-                        onProjectReady: { coordinator.open(project: $0) }
-                    )
-                }
+                coordinator.presentFloatingHomeToolbar()
             }
         }
 
         if coordinator.activeProject != nil {
             Button("Back to Home") {
                 coordinator.showHome()
-                windowController.activateAppWindow()
+                windowController.activateAppWindow(forceAppActivation: true)
             }
         }
 
@@ -244,11 +238,43 @@ final class MouseLensAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+enum HomeToolbarPresentationMode: Equatable {
+    case primaryWindow
+    case floatingPanel
+
+    static func current(environment: [String: String] = ProcessInfo.processInfo.environment) -> Self {
+        environment["XCTestConfigurationFilePath"] == nil ? .floatingPanel : .primaryWindow
+    }
+
+    var rendersIntoPrimaryWindow: Bool {
+        self == .primaryWindow
+    }
+}
+
 private struct RootView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var homeViewModel: HomeViewModel
     @ObservedObject var editorViewModel: EditorViewModel
     let windowController: AppWindowController
+
+    private var homeToolbarPresentationMode: HomeToolbarPresentationMode {
+        HomeToolbarPresentationMode.current()
+    }
+
+    private var homeToolbarRendersIntoPrimaryWindow: Bool {
+        homeToolbarPresentationMode.rendersIntoPrimaryWindow
+    }
+
+    private var primaryWindowWidth: CGFloat {
+        coordinator.activeProject == nil && !homeToolbarRendersIntoPrimaryWindow ? 1 : 1120
+    }
+
+    private var primaryWindowHeight: CGFloat {
+        if coordinator.activeProject != nil {
+            return 720
+        }
+        return homeToolbarRendersIntoPrimaryWindow ? 96 : 1
+    }
 
     var body: some View {
         ZStack {
@@ -260,13 +286,15 @@ private struct RootView: View {
                     project: project,
                     onBack: { coordinator.closeProject() }
                 )
-            } else {
+            } else if homeToolbarRendersIntoPrimaryWindow {
                 HomeView(
                     viewModel: homeViewModel,
                     onProjectReady: { project in
                         coordinator.open(project: project)
                     }
                 )
+            } else {
+                Color.clear
             }
         }
         .background(
@@ -276,17 +304,20 @@ private struct RootView: View {
             }
         )
         .frame(
-            minWidth: 1120,
-            idealWidth: 1120,
+            minWidth: primaryWindowWidth,
+            idealWidth: primaryWindowWidth,
             maxWidth: .infinity,
-            minHeight: coordinator.activeProject == nil ? 96 : 720,
-            idealHeight: coordinator.activeProject == nil ? 96 : 720,
-            maxHeight: coordinator.activeProject == nil ? 96 : .infinity
+            minHeight: primaryWindowHeight,
+            idealHeight: primaryWindowHeight,
+            maxHeight: coordinator.activeProject == nil ? primaryWindowHeight : .infinity
         )
         .onAppear {
             configureWindowForCurrentMode()
         }
         .onChange(of: coordinator.activeProject?.id) { _, _ in
+            configureWindowForCurrentMode()
+        }
+        .onChange(of: coordinator.isFloatingHomeToolbarPresented) { _, _ in
             configureWindowForCurrentMode()
         }
         .onChange(of: homeViewModel.recordingState, initial: true) { _, state in
@@ -298,8 +329,9 @@ private struct RootView: View {
             homeViewModel.consumeCompletedProject()
             Task { @MainActor in
                 await Task.yield()
-                windowController.restoreAfterCapture()
-                windowController.activateAppWindow()
+                windowController.restoreAfterCapture(activate: false)
+                windowController.applyEditorWindowLayout()
+                windowController.activateAppWindow(forceAppActivation: true)
             }
         }
     }
@@ -309,9 +341,30 @@ private struct RootView: View {
             await Task.yield()
 
             if coordinator.activeProject == nil {
-                windowController.applyHomeToolbarWindowLayout()
+                if homeToolbarRendersIntoPrimaryWindow {
+                    windowController.hideCaptureSetupPanel()
+                    windowController.applyHomeToolbarWindowLayout()
+                } else {
+                    windowController.hidePrimaryWindowForFloatingHomeToolbar()
+                    if coordinator.isFloatingHomeToolbarPresented {
+                        if !windowController.isCaptureSetupPanelVisible {
+                            windowController.showCaptureSetupPanel {
+                                HomeView(
+                                    viewModel: homeViewModel,
+                                    onProjectReady: { project in
+                                        coordinator.open(project: project)
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        windowController.hideCaptureSetupPanel()
+                    }
+                }
             } else {
+                windowController.hideCaptureSetupPanel()
                 windowController.applyEditorWindowLayout()
+                windowController.activateAppWindow()
             }
         }
     }

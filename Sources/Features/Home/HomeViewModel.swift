@@ -568,7 +568,7 @@ final class HomeViewModel: ObservableObject {
     static func windowTargetRefreshPolicyForRecording(
         selectedWindowTargetID: UInt32?
     ) -> WindowTargetSelectionPolicy {
-        selectedWindowTargetID == nil ? .preferCurrentWindow : .preserveSelection
+        .preferCurrentWindow
     }
 
     private func normalize(events: [PointerEvent], for session: CaptureSession) -> [PointerEvent] {

@@ -215,6 +215,43 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual(previewPoint.y, exportPoint.y, accuracy: 0.0001)
     }
 
+    func testScreenCaptureBasePresentationFillsOutputCanvas() {
+        let planner = SourceCropPlanner()
+        let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let presentation = planner.presentation(
+            for: CGRect(x: 0, y: 0, width: 2560, height: 1600),
+            contentRect: contentRect,
+            snapshot: FrameSnapshot(focus: .center, zoom: 1.0, emphasis: .none),
+            captureTarget: .screen
+        )
+
+        XCTAssertEqual(presentation.displayRect, contentRect)
+        XCTAssertEqual(presentation.cropRect.width, 2560, accuracy: 0.0001)
+        XCTAssertLessThan(presentation.cropRect.height, 1600)
+        XCTAssertEqual(
+            presentation.cropRect.width / presentation.cropRect.height,
+            contentRect.width / contentRect.height,
+            accuracy: 0.0001
+        )
+    }
+
+    func testWindowCaptureBasePresentationPreservesFullSource() {
+        let planner = SourceCropPlanner()
+        let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let presentation = planner.presentation(
+            for: CGRect(x: 0, y: 0, width: 2560, height: 1600),
+            contentRect: contentRect,
+            snapshot: FrameSnapshot(focus: .center, zoom: 1.0, emphasis: .none),
+            captureTarget: .window
+        )
+
+        XCTAssertEqual(presentation.cropRect, CGRect(x: 0, y: 0, width: 2560, height: 1600))
+        XCTAssertEqual(presentation.displayRect.width, 1440, accuracy: 0.0001)
+        XCTAssertEqual(presentation.displayRect.height, 900, accuracy: 0.0001)
+        XCTAssertEqual(presentation.displayRect.midX, contentRect.midX, accuracy: 0.0001)
+        XCTAssertEqual(presentation.displayRect.midY, contentRect.midY, accuracy: 0.0001)
+    }
+
     func testWindowBasePreviewFitsFullSourceWithoutCropping() {
         let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
         let geometry = RealtimePreviewGeometry(

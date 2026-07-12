@@ -3,6 +3,30 @@ import AVFoundation
 import AVKit
 import SwiftUI
 
+struct PreviewPlaybackTimeline {
+    let project: RecordingProject
+    let displayDuration: TimeInterval
+    let usesSourceTimeline: Bool
+
+    func displayTime(forPlaybackTime playbackTime: TimeInterval) -> TimeInterval {
+        if usesSourceTimeline {
+            return project.clipOffset(forSourceTimestamp: playbackTime)
+                .clamped(to: 0...displayDuration)
+        }
+
+        return playbackTime.clamped(to: 0...displayDuration)
+    }
+
+    func sourceTime(forDisplayTime displayTime: TimeInterval) -> TimeInterval {
+        let clampedTime = displayTime.clamped(to: 0...displayDuration)
+        if usesSourceTimeline {
+            return project.sourceTimestamp(forClipOffset: clampedTime)
+        }
+
+        return clampedTime
+    }
+}
+
 struct PreviewCanvasView: View {
     let project: RecordingProject
     let previewImage: NSImage?
@@ -80,6 +104,11 @@ struct PreviewCanvasView: View {
                 PreviewVideoPlayerView(
                     url: activePlaybackURL,
                     seekTime: activePlaybackSeekTime,
+                    displayTime: previewTimestamp.clamped(to: 0...previewDuration),
+                    playbackTimeline: playbackTimeline,
+                    onDisplaySeekRequested: { displayTime in
+                        onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
+                    },
                     onPlaybackTimeChange: { playbackTime in
                         updateTimelineFromPlayback(
                             playbackTime,
@@ -153,7 +182,7 @@ struct PreviewCanvasView: View {
                 sourceSize: sourceSize,
                 contentRect: contentRect,
                 snapshot: frameSnapshot,
-                preservesFullSourceAtBase: true
+                preservesFullSourceAtBase: project.captureTarget == .window
             )
             let cornerRadius = max(project.style.cornerRadius, 0)
 
@@ -164,11 +193,16 @@ struct PreviewCanvasView: View {
                     PreviewVideoPlayerView(
                         url: url,
                         seekTime: activePlaybackSeekTime,
+                        displayTime: previewTimestamp.clamped(to: 0...previewDuration),
+                        playbackTimeline: playbackTimeline,
                         pointerSnapshot: pointerSnapshot,
                         frameSnapshot: frameSnapshot,
                         realtimeGeometry: previewGeometry,
                         contentCornerRadius: cornerRadius,
                         showsReconstructedCursor: project.reconstructsCursor,
+                        onDisplaySeekRequested: { displayTime in
+                            onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
+                        },
                         onPlaybackTimeChange: { playbackTime in
                             updateTimelineFromPlayback(playbackTime, usesSourceTimeline: true)
                         },
@@ -210,19 +244,28 @@ struct PreviewCanvasView: View {
     }
 
     private var activePlaybackSeekTime: TimeInterval {
-        activePlaybackUsesSourceTimeline
-            ? project.sourceTimestamp(forClipOffset: previewTimestamp)
-            : previewTimestamp
+        playbackTimeline.sourceTime(forDisplayTime: previewTimestamp)
     }
 
     private var activePlaybackUsesSourceTimeline: Bool {
         true
     }
 
+    private var playbackTimeline: PreviewPlaybackTimeline {
+        PreviewPlaybackTimeline(
+            project: project,
+            displayDuration: previewDuration,
+            usesSourceTimeline: activePlaybackUsesSourceTimeline
+        )
+    }
+
     private func updateTimelineFromPlayback(_ playbackTime: TimeInterval, usesSourceTimeline: Bool) {
-        let clipOffset = usesSourceTimeline
-            ? project.clipOffset(forSourceTimestamp: playbackTime)
-            : playbackTime.clamped(to: 0...previewDuration)
+        let clipOffset = PreviewPlaybackTimeline(
+            project: project,
+            displayDuration: previewDuration,
+            usesSourceTimeline: usesSourceTimeline
+        )
+        .displayTime(forPlaybackTime: playbackTime)
         onPlaybackTimeChange(clipOffset)
     }
 
@@ -461,11 +504,14 @@ struct RealtimePreviewGeometry {
 private struct PreviewVideoPlayerView: NSViewRepresentable {
     let url: URL
     let seekTime: TimeInterval
+    let displayTime: TimeInterval
+    let playbackTimeline: PreviewPlaybackTimeline
     var pointerSnapshot: PointerSnapshot?
     var frameSnapshot: FrameSnapshot?
     var realtimeGeometry: RealtimePreviewGeometry?
     var contentCornerRadius: CGFloat = 0
     var showsReconstructedCursor = false
+    let onDisplaySeekRequested: (TimeInterval) -> Void
     let onPlaybackTimeChange: (TimeInterval) -> Void
     let onPlaybackEnded: () -> Void
 
@@ -482,12 +528,18 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     func updateNSView(_ nsView: StablePlayerContainerView, context: Context) {
         context.coordinator.onPlaybackTimeChange = onPlaybackTimeChange
         context.coordinator.onPlaybackEnded = onPlaybackEnded
+        context.coordinator.playbackTimeline = playbackTimeline
         nsView.updateRealtimeOverlay(
             snapshot: pointerSnapshot,
             frameSnapshot: frameSnapshot,
             geometry: realtimeGeometry,
             cornerRadius: contentCornerRadius,
             showsCursor: showsReconstructedCursor
+        )
+        nsView.updatePlaybackControls(
+            timeline: playbackTimeline,
+            displayTime: displayTime,
+            onSeekRequested: onDisplaySeekRequested
         )
 
         if context.coordinator.url != url {
@@ -586,6 +638,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
         weak var observedPlayer: AVPlayer?
         var onPlaybackTimeChange: ((TimeInterval) -> Void)?
         var onPlaybackEnded: (() -> Void)?
+        var playbackTimeline: PreviewPlaybackTimeline?
 
         func attachTimeObserver(to player: AVPlayer, container: StablePlayerContainerView) {
             observedPlayer = player
@@ -598,7 +651,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 guard seconds.isFinite else { return }
                 self.seekTime = seconds
                 self.lastPlaybackReportTime = seconds
-                container?.updatePlaybackProgress()
+                container?.updatePlaybackProgress(sourceTime: seconds)
                 self.onPlaybackTimeChange?(seconds)
             }
         }
@@ -623,18 +676,13 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 queue: .main
             ) { [weak self, weak player, weak container] _ in
                 guard let self, let player else { return }
-                self.isSeekingProgrammatically = true
                 player.pause()
-                let startTime = CMTime(seconds: 0, preferredTimescale: 600)
-                player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak container] _ in
-                    DispatchQueue.main.async { [weak self, weak container] in
-                        guard let self else { return }
-                        self.seekTime = 0
-                        self.lastPlaybackReportTime = 0
-                        self.isSeekingProgrammatically = false
-                        container?.updatePlaybackProgress()
-                        self.onPlaybackEnded?()
-                    }
+                DispatchQueue.main.async { [weak self, weak container] in
+                    guard let self else { return }
+                    self.seekTime = 0
+                    self.lastPlaybackReportTime = 0
+                    container?.updatePlaybackProgress(displayTime: 0)
+                    self.onPlaybackEnded?()
                 }
             }
         }
@@ -649,6 +697,7 @@ private final class StablePlayerContainerView: NSView {
     private let controlsView = PlaybackControlsView()
     private var realtimeGeometry: RealtimePreviewGeometry?
     private var contentCornerRadius: CGFloat = 0
+    private var playbackTimeline: PreviewPlaybackTimeline?
 
     override var isFlipped: Bool { true }
 
@@ -722,6 +771,20 @@ private final class StablePlayerContainerView: NSView {
         controlsView.updateState()
     }
 
+    func updatePlaybackControls(
+        timeline: PreviewPlaybackTimeline,
+        displayTime: TimeInterval,
+        onSeekRequested: @escaping (TimeInterval) -> Void
+    ) {
+        playbackTimeline = timeline
+        controlsView.updateTimeline(
+            displayTime: displayTime,
+            displayDuration: timeline.displayDuration,
+            onSeekRequested: onSeekRequested
+        )
+        controlsView.updateState()
+    }
+
     func updateRealtimeOverlay(
         snapshot: PointerSnapshot?,
         frameSnapshot: FrameSnapshot?,
@@ -750,7 +813,15 @@ private final class StablePlayerContainerView: NSView {
         controlsView.updateState()
     }
 
-    func updatePlaybackProgress() {
+    func updatePlaybackProgress(sourceTime: TimeInterval) {
+        if let playbackTimeline {
+            controlsView.updateDisplayTime(playbackTimeline.displayTime(forPlaybackTime: sourceTime))
+        }
+        controlsView.updateState()
+    }
+
+    func updatePlaybackProgress(displayTime: TimeInterval) {
+        controlsView.updateDisplayTime(displayTime)
         controlsView.updateState()
     }
 
@@ -791,6 +862,9 @@ private final class PlaybackControlsView: NSView {
     private let durationLabel = NSTextField(labelWithString: "00:00.00")
     private let progressSlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private var isScrubbing = false
+    private var displayTime: TimeInterval = 0
+    private var displayDuration: TimeInterval = 0
+    private var onSeekRequested: ((TimeInterval) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -852,18 +926,25 @@ private final class PlaybackControlsView: NSView {
         super.mouseDown(with: event)
     }
 
-    func updateState() {
-        guard let player else {
-            playPauseButton.title = "▶"
-            currentTimeLabel.stringValue = "00:00.00"
-            durationLabel.stringValue = "00:00.00"
-            progressSlider.doubleValue = 0
-            return
-        }
+    func updateTimeline(
+        displayTime: TimeInterval,
+        displayDuration: TimeInterval,
+        onSeekRequested: @escaping (TimeInterval) -> Void
+    ) {
+        self.displayTime = max(displayTime, 0)
+        self.displayDuration = max(displayDuration, 0)
+        self.onSeekRequested = onSeekRequested
+    }
 
-        let currentTime = safeSeconds(player.currentTime())
-        let duration = safeDuration(for: player)
-        playPauseButton.title = player.rate == 0 ? "▶" : "Ⅱ"
+    func updateDisplayTime(_ displayTime: TimeInterval) {
+        self.displayTime = max(displayTime, 0)
+    }
+
+    func updateState() {
+        let duration = max(displayDuration, 0)
+        let currentTime = displayTime.clamped(to: 0...max(duration, 0))
+        let isPlaying = (player?.rate ?? 0) != 0
+        playPauseButton.title = isPlaying ? "Ⅱ" : "▶"
         currentTimeLabel.stringValue = formatTimestamp(currentTime)
         durationLabel.stringValue = formatTimestamp(duration)
 
@@ -883,38 +964,17 @@ private final class PlaybackControlsView: NSView {
     }
 
     @objc private func scrub() {
-        guard let player else { return }
-        let duration = safeDuration(for: player)
+        let duration = max(displayDuration, 0)
         guard duration > 0 else { return }
 
         isScrubbing = true
         let seconds = progressSlider.doubleValue.clamped(to: 0...1) * duration
         currentTimeLabel.stringValue = formatTimestamp(seconds)
-        player.seek(
-            to: CMTime(seconds: seconds, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600)
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.isScrubbing = false
-                self?.updateState()
-            }
+        onSeekRequested?(seconds)
+        DispatchQueue.main.async { [weak self] in
+            self?.isScrubbing = false
+            self?.updateState()
         }
-    }
-
-    private func safeDuration(for player: AVPlayer) -> TimeInterval {
-        if let itemDuration = player.currentItem?.duration {
-            let seconds = CMTimeGetSeconds(itemDuration)
-            if seconds.isFinite && seconds > 0 {
-                return seconds
-            }
-        }
-        return 0
-    }
-
-    private func safeSeconds(_ time: CMTime) -> TimeInterval {
-        let seconds = CMTimeGetSeconds(time)
-        return seconds.isFinite ? max(seconds, 0) : 0
     }
 
     private func formatTimestamp(_ timestamp: TimeInterval) -> String {

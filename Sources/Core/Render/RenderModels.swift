@@ -823,6 +823,20 @@ struct SourceCropPlanner {
         for sourceExtent: CGRect,
         contentRect: CGRect,
         snapshot: FrameSnapshot,
+        captureTarget: CaptureTarget
+    ) -> Presentation {
+        presentation(
+            for: sourceExtent,
+            contentRect: contentRect,
+            snapshot: snapshot,
+            preservesFullSourceAtBase: captureTarget == .window
+        )
+    }
+
+    func presentation(
+        for sourceExtent: CGRect,
+        contentRect: CGRect,
+        snapshot: FrameSnapshot,
         preservesFullSourceAtBase: Bool
     ) -> Presentation {
         let outputAspectRatio = contentRect.width / max(contentRect.height, 1)
@@ -1846,7 +1860,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             for: sourceImage.extent,
             contentRect: preparedAssets.layout.contentRect,
             snapshot: snapshot,
-            preservesFullSourceAtBase: true
+            captureTarget: project.captureTarget
         )
         let cropRect = presentation.cropRect
         let displayRect = presentation.displayRect

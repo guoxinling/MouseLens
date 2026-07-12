@@ -128,7 +128,7 @@ final class EditorViewModel: ObservableObject {
         needsPreviewVideoAfterTrimEdit = false
         needsPreviewVideoAfterManualZoomEdit = false
         syncClipState(with: project.effectiveClipSegments, selectedIndex: 0)
-        syncManualZoomState(with: project.manualZoomSegments, selectedID: project.manualZoomSegments.first?.id)
+        syncManualZoomState(with: project.manualZoomSegments, selectedID: nil)
         previewTimestamp = defaultPreviewTimestamp(for: project)
         isApplyingConfiguration = false
         schedulePreview(for: project)
@@ -493,6 +493,8 @@ final class EditorViewModel: ObservableObject {
     func selectClipSegment(at index: Int) {
         let segments = currentClipSegments
         guard segments.indices.contains(index) else { return }
+        selectedManualZoomSegmentID = nil
+        isAdjustingManualZoomArea = false
         selectedClipSegmentIndex = index
         syncSelectedTrimState()
         previewTimestamp = segments[index].start
@@ -1023,7 +1025,7 @@ final class EditorViewModel: ObservableObject {
         )
         let nextSelectedID = selectedID.flatMap { id in
             normalizedSegments.contains(where: { $0.id == id }) ? id : nil
-        } ?? normalizedSegments.first?.id
+        }
         let updatedProject = workingProject.updating(
             style: workingProject.style,
             cameraKeyframes: workingProject.cameraKeyframes,
@@ -1118,7 +1120,7 @@ final class EditorViewModel: ObservableObject {
         if let selectedID, normalizedSegments.contains(where: { $0.id == selectedID }) {
             selectedManualZoomSegmentID = selectedID
         } else {
-            selectedManualZoomSegmentID = normalizedSegments.first?.id
+            selectedManualZoomSegmentID = nil
         }
         if selectedManualZoomSegmentID == nil {
             isAdjustingManualZoomArea = false

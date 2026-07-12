@@ -83,6 +83,36 @@ struct CaptureWindowOption: Identifiable, Equatable {
     }
 }
 
+struct CaptureWindowPriority: Comparable {
+    let isFrontmostApp: Bool
+    let isActive: Bool
+    let zIndex: Int
+    let windowLayer: Int
+    let area: CGFloat
+
+    static func < (lhs: CaptureWindowPriority, rhs: CaptureWindowPriority) -> Bool {
+        if lhs.isFrontmostApp != rhs.isFrontmostApp {
+            return lhs.isFrontmostApp == false
+        }
+        if lhs.isActive != rhs.isActive {
+            return lhs.isActive == false
+        }
+        if lhs.zIndex != rhs.zIndex {
+            return lhs.zIndex > rhs.zIndex
+        }
+        if lhs.windowLayer != rhs.windowLayer {
+            return lhs.windowLayer > rhs.windowLayer
+        }
+        return lhs.area < rhs.area
+    }
+}
+
+private struct OnScreenWindowMetadata {
+    let zIndex: Int
+    let ownerProcessID: pid_t?
+    let ownerName: String?
+}
+
 struct CaptureSession: Equatable, Codable {
     let id: UUID
     let configuration: ScreenRecorderConfiguration
@@ -576,20 +606,30 @@ final class ScreenRecorder {
 
         let shareableContent = try await loadShareableContent()
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        return selectableWindows(in: shareableContent)
+        let metadataByWindowID = Self.onScreenWindowMetadata()
+        return selectableWindows(in: shareableContent, metadataByWindowID: metadataByWindowID)
             .sorted { lhs, rhs in
-                score(window: lhs, frontmostPID: frontmostPID) > score(window: rhs, frontmostPID: frontmostPID)
+                windowPriority(
+                    window: lhs,
+                    frontmostPID: frontmostPID,
+                    metadataByWindowID: metadataByWindowID
+                ) >
+                    windowPriority(
+                        window: rhs,
+                        frontmostPID: frontmostPID,
+                        metadataByWindowID: metadataByWindowID
+                    )
             }
             .map { window in
-            let appName = window.owningApplication?.applicationName ?? "Unknown App"
-            let title = window.title ?? ""
-            return CaptureWindowOption(
-                id: window.windowID,
-                appName: appName,
-                title: title,
-                frame: CaptureViewport(rect: window.frame)
-            )
-        }
+                let appName = window.owningApplication?.applicationName ?? "Unknown App"
+                let title = window.title ?? ""
+                return CaptureWindowOption(
+                    id: window.windowID,
+                    appName: appName,
+                    title: title,
+                    frame: CaptureViewport(rect: window.frame)
+                )
+            }
     }
 
     func start(configuration: ScreenRecorderConfiguration) async throws -> CaptureSession {
@@ -812,10 +852,15 @@ final class ScreenRecorder {
         in shareableContent: SCShareableContent,
         screenBounds: CGRect
     ) throws -> CaptureSource {
-        let candidates = selectableWindows(in: shareableContent)
+        let metadataByWindowID = Self.onScreenWindowMetadata()
+        let candidates = selectableWindows(in: shareableContent, metadataByWindowID: metadataByWindowID)
 
         if let preferredWindowID = configuration.preferredWindowID,
-           let window = window(matching: preferredWindowID, in: shareableContent) {
+           let window = window(
+            matching: preferredWindowID,
+            in: shareableContent,
+            metadataByWindowID: metadataByWindowID
+           ) {
             return makeWindowCaptureSource(for: window, screenBounds: screenBounds)
         }
 
@@ -829,7 +874,8 @@ final class ScreenRecorder {
 
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let window = candidates.max { lhs, rhs in
-            score(window: lhs, frontmostPID: frontmostPID) < score(window: rhs, frontmostPID: frontmostPID)
+            windowPriority(window: lhs, frontmostPID: frontmostPID, metadataByWindowID: metadataByWindowID) <
+                windowPriority(window: rhs, frontmostPID: frontmostPID, metadataByWindowID: metadataByWindowID)
         }
 
         guard let window else {
@@ -855,30 +901,93 @@ final class ScreenRecorder {
         )
     }
 
-    private func window(matching windowID: UInt32, in shareableContent: SCShareableContent) -> SCWindow? {
+    private func window(
+        matching windowID: UInt32,
+        in shareableContent: SCShareableContent,
+        metadataByWindowID: [UInt32: OnScreenWindowMetadata]
+    ) -> SCWindow? {
         shareableContent.windows.first { window in
-            window.windowID == windowID && isSelectableWindow(window)
+            window.windowID == windowID &&
+                isSelectableWindow(window, metadata: metadataByWindowID[window.windowID])
         }
     }
 
-    private func selectableWindows(in shareableContent: SCShareableContent) -> [SCWindow] {
-        shareableContent.windows.filter(isSelectableWindow)
+    private func selectableWindows(
+        in shareableContent: SCShareableContent,
+        metadataByWindowID: [UInt32: OnScreenWindowMetadata]
+    ) -> [SCWindow] {
+        shareableContent.windows.filter { window in
+            isSelectableWindow(window, metadata: metadataByWindowID[window.windowID])
+        }
     }
 
-    private func isSelectableWindow(_ window: SCWindow) -> Bool {
+    private func isSelectableWindow(_ window: SCWindow, metadata: OnScreenWindowMetadata?) -> Bool {
         guard window.isOnScreen else { return false }
         guard window.frame.width > 120, window.frame.height > 80 else { return false }
-        guard window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier else { return false }
+        guard !Self.isWindowOwnedByCurrentApp(
+            bundleIdentifier: window.owningApplication?.bundleIdentifier,
+            processID: window.owningApplication?.processID ?? metadata?.ownerProcessID,
+            applicationName: window.owningApplication?.applicationName ?? metadata?.ownerName
+        ) else { return false }
         guard window.owningApplication?.bundleIdentifier != "com.apple.dock" else { return false }
         guard window.windowLayer >= 0, window.windowLayer <= 20 else { return false }
         return true
     }
 
-    private func score(window: SCWindow, frontmostPID: pid_t?) -> Double {
-        let area = window.frame.width * window.frame.height
-        let frontmostBoost = (frontmostPID != nil && window.owningApplication?.processID == frontmostPID) ? 10_000_000 : 0
-        let activeBoost = window.isActive ? 2_000_000 : 0
-        return area + CGFloat(frontmostBoost + activeBoost).doubleValue
+    static func isWindowOwnedByCurrentApp(
+        bundleIdentifier: String?,
+        processID: pid_t?,
+        applicationName: String?,
+        currentBundleIdentifier: String? = Bundle.main.bundleIdentifier,
+        currentProcessID: pid_t = ProcessInfo.processInfo.processIdentifier,
+        currentApplicationName: String = ProcessInfo.processInfo.processName
+    ) -> Bool {
+        if let processID, processID == currentProcessID {
+            return true
+        }
+        if let bundleIdentifier, let currentBundleIdentifier, bundleIdentifier == currentBundleIdentifier {
+            return true
+        }
+        if let applicationName, applicationName == currentApplicationName {
+            return true
+        }
+        return false
+    }
+
+    private func windowPriority(
+        window: SCWindow,
+        frontmostPID: pid_t?,
+        metadataByWindowID: [UInt32: OnScreenWindowMetadata]
+    ) -> CaptureWindowPriority {
+        let metadata = metadataByWindowID[window.windowID]
+        return CaptureWindowPriority(
+            isFrontmostApp: frontmostPID != nil &&
+                (window.owningApplication?.processID ?? metadata?.ownerProcessID) == frontmostPID,
+            isActive: window.isActive,
+            zIndex: metadata?.zIndex ?? .max,
+            windowLayer: Int(window.windowLayer),
+            area: window.frame.width * window.frame.height
+        )
+    }
+
+    private static func onScreenWindowMetadata() -> [UInt32: OnScreenWindowMetadata] {
+        guard
+            let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]]
+        else {
+            return [:]
+        }
+
+        var metadataByWindowID: [UInt32: OnScreenWindowMetadata] = [:]
+        for (index, entry) in windowInfo.enumerated() {
+            guard let windowNumber = entry[kCGWindowNumber as String] as? NSNumber else { continue }
+            metadataByWindowID[windowNumber.uint32Value] = OnScreenWindowMetadata(
+                zIndex: index,
+                ownerProcessID: (entry[kCGWindowOwnerPID as String] as? NSNumber).map { pid_t($0.intValue) },
+                ownerName: entry[kCGWindowOwnerName as String] as? String
+            )
+        }
+        return metadataByWindowID
     }
 
     private func startCapture(stream: SCStream) async throws {

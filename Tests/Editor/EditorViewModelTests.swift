@@ -453,6 +453,7 @@ final class EditorViewModelTests: XCTestCase {
         )
 
         viewModel.configure(for: project)
+        viewModel.selectManualZoomSegment(id: autoSegment.id)
 
         XCTAssertEqual(viewModel.selectedManualZoomSegment?.source, .auto)
         XCTAssertTrue(viewModel.canConvertSelectedZoomSegmentToManual)
@@ -484,6 +485,7 @@ final class EditorViewModelTests: XCTestCase {
 
         viewModel.configure(for: project)
         viewModel.updatePreviewTimestamp(0.5)
+        viewModel.selectManualZoomSegment(id: autoSegment.id)
         XCTAssertTrue(viewModel.canSplitTimelineSelection)
 
         viewModel.splitTimelineSelectionAtPlayhead()
@@ -517,12 +519,66 @@ final class EditorViewModelTests: XCTestCase {
         viewModel.updatePreviewTimestamp(0.5)
         viewModel.splitClipAtPlayhead()
         XCTAssertEqual(viewModel.clipSegments.count, 2)
+        viewModel.selectManualZoomSegment(id: segment.id)
 
         viewModel.deleteTimelineSelection()
 
         XCTAssertTrue(viewModel.manualZoomSegments.isEmpty)
         XCTAssertEqual(viewModel.clipSegments.count, 2)
         XCTAssertEqual(viewModel.project?.zoomTrackEdited, true)
+    }
+
+    func testSelectingClipClearsZoomSelectionSoClipActionsStayAvailable() throws {
+        let viewModel = makeViewModel()
+        let segment = ManualZoomSegment(
+            start: 0.2,
+            end: 0.8,
+            focus: .center,
+            zoomLevel: 1.7,
+            source: .manual
+        )
+        let project = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            manualZoomSegments: [segment],
+            zoomTrackEdited: true
+        )
+
+        viewModel.configure(for: project)
+        viewModel.updatePreviewTimestamp(0.5)
+        viewModel.splitClipAtPlayhead()
+        viewModel.selectManualZoomSegment(id: segment.id)
+        XCTAssertNotNil(viewModel.selectedManualZoomSegment)
+
+        viewModel.selectClipSegment(at: 0)
+
+        XCTAssertNil(viewModel.selectedManualZoomSegment)
+        XCTAssertEqual(viewModel.timelineSelectionLabel, "Clip")
+        XCTAssertTrue(viewModel.canDeleteTimelineSelection)
+        XCTAssertFalse(viewModel.canSplitTimelineSelection)
+    }
+
+    func testExistingZoomTrackDoesNotAutoSelectZoomSegmentOnOpen() {
+        let viewModel = makeViewModel()
+        let segment = ManualZoomSegment(
+            start: 0.2,
+            end: 0.8,
+            focus: .center,
+            zoomLevel: 1.7,
+            source: .manual
+        )
+        let project = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            manualZoomSegments: [segment],
+            zoomTrackEdited: true
+        )
+
+        viewModel.configure(for: project)
+
+        XCTAssertNil(viewModel.selectedManualZoomSegment)
+        XCTAssertEqual(viewModel.timelineSelectionLabel, "Clip")
+        XCTAssertFalse(viewModel.canDeleteTimelineSelection)
     }
 
     func testManualZoomAreaAdjustmentIsExplicit() {
@@ -645,6 +701,32 @@ final class EditorViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.trimStart, 0.2, accuracy: 0.0001)
         XCTAssertEqual(viewModel.trimEnd, 0.8, accuracy: 0.0001)
+    }
+
+    func testPreviewPlaybackTimelineUsesClipOffsetsForTrimmedPlayback() {
+        let baseProject = makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            duration: 15.0
+        )
+        let project = baseProject.updating(
+            style: baseProject.style,
+            cameraKeyframes: baseProject.cameraKeyframes,
+            trimRange: ProjectTrimRange(start: 10.0, end: 15.0),
+            clipSegments: [ProjectTrimRange(start: 10.0, end: 15.0)]
+        )
+        let timeline = PreviewPlaybackTimeline(
+            project: project,
+            displayDuration: project.trimmedDuration,
+            usesSourceTimeline: true
+        )
+
+        XCTAssertEqual(timeline.displayTime(forPlaybackTime: 10.0), 0.0, accuracy: 0.0001)
+        XCTAssertEqual(timeline.displayTime(forPlaybackTime: 12.5), 2.5, accuracy: 0.0001)
+        XCTAssertEqual(timeline.displayTime(forPlaybackTime: 15.0), 5.0, accuracy: 0.0001)
+        XCTAssertEqual(timeline.sourceTime(forDisplayTime: 0.0), 10.0, accuracy: 0.0001)
+        XCTAssertEqual(timeline.sourceTime(forDisplayTime: 2.5), 12.5, accuracy: 0.0001)
+        XCTAssertEqual(timeline.sourceTime(forDisplayTime: 5.0), 15.0, accuracy: 0.0001)
     }
 
     func testWindowPointerNormalizationUsesScreenCaptureKitWindowCoordinates() {

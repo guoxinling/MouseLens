@@ -104,10 +104,10 @@ final class HomeViewModelWindowTargetTests: XCTestCase {
         )
     }
 
-    func testRecordingRefreshPrefersExistingSelectionWhenPresent() {
+    func testRecordingRefreshAlwaysPrefersCurrentWindowEvenWhenSelectionExists() {
         XCTAssertEqual(
             HomeViewModel.windowTargetRefreshPolicyForRecording(selectedWindowTargetID: previousWindow.id),
-            .preserveSelection
+            .preferCurrentWindow
         )
     }
 

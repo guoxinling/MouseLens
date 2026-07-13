@@ -16,6 +16,30 @@ final class AppWindowControllerTests: XCTestCase {
         XCTAssertTrue(coordinator.isFloatingHomeToolbarPresented)
     }
 
+    func testAppCoordinatorTemporarilyHidesFloatingToolbarForRecording() {
+        let coordinator = AppCoordinator()
+
+        XCTAssertTrue(coordinator.isFloatingHomeToolbarPresented)
+
+        coordinator.hideFloatingHomeToolbarForRecording()
+
+        XCTAssertFalse(coordinator.isFloatingHomeToolbarPresented)
+
+        coordinator.restoreFloatingHomeToolbarAfterRecordingInterruption()
+
+        XCTAssertTrue(coordinator.isFloatingHomeToolbarPresented)
+    }
+
+    func testAppCoordinatorDoesNotReopenToolbarIfUserHadAlreadyHiddenIt() {
+        let coordinator = AppCoordinator()
+        coordinator.dismissFloatingHomeToolbar()
+
+        coordinator.hideFloatingHomeToolbarForRecording()
+        coordinator.restoreFloatingHomeToolbarAfterRecordingInterruption()
+
+        XCTAssertFalse(coordinator.isFloatingHomeToolbarPresented)
+    }
+
     func testHomeToolbarUsesFloatingPanelOutsideXCTest() {
         XCTAssertEqual(
             HomeToolbarPresentationMode.current(environment: [:]),

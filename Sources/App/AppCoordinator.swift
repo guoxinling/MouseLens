@@ -4,8 +4,10 @@ import Foundation
 final class AppCoordinator: ObservableObject {
     @Published var activeProject: RecordingProject?
     @Published var isFloatingHomeToolbarPresented = true
+    private var shouldRestoreFloatingHomeToolbarAfterRecording = false
 
     func open(project: RecordingProject) {
+        shouldRestoreFloatingHomeToolbarAfterRecording = false
         isFloatingHomeToolbarPresented = false
         activeProject = project
     }
@@ -25,6 +27,18 @@ final class AppCoordinator: ObservableObject {
     }
 
     func dismissFloatingHomeToolbar() {
+        shouldRestoreFloatingHomeToolbarAfterRecording = false
         isFloatingHomeToolbarPresented = false
+    }
+
+    func hideFloatingHomeToolbarForRecording() {
+        shouldRestoreFloatingHomeToolbarAfterRecording = isFloatingHomeToolbarPresented
+        isFloatingHomeToolbarPresented = false
+    }
+
+    func restoreFloatingHomeToolbarAfterRecordingInterruption() {
+        guard shouldRestoreFloatingHomeToolbarAfterRecording else { return }
+        shouldRestoreFloatingHomeToolbarAfterRecording = false
+        isFloatingHomeToolbarPresented = true
     }
 }

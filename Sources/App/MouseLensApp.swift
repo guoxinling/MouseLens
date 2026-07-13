@@ -321,6 +321,14 @@ private struct RootView: View {
             configureWindowForCurrentMode()
         }
         .onChange(of: homeViewModel.recordingState, initial: true) { _, state in
+            switch state {
+            case .idle:
+                if coordinator.activeProject == nil, homeViewModel.completedProject == nil {
+                    coordinator.restoreFloatingHomeToolbarAfterRecordingInterruption()
+                }
+            case .countdown, .recording:
+                coordinator.hideFloatingHomeToolbarForRecording()
+            }
             updateRecordingControlPanel(for: state)
         }
         .onChange(of: homeViewModel.completedProject?.id) { _, _ in

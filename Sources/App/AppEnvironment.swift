@@ -4,6 +4,7 @@ struct AppEnvironment {
     let preferencesStore: AppPreferencesStore
     let permissionManager: PermissionManager
     let screenRecorder: ScreenRecorder
+    let presenterCameraRecorder: PresenterCameraRecording
     let eventMonitor: EventTapMonitor
     let cameraPlanEngine: CameraPlanEngine
     let projectStore: ProjectStore
@@ -28,12 +29,14 @@ struct AppEnvironment {
         let hotkeyManager = HotkeyManager()
         let windowController = AppWindowController()
         let screenRecorder = ScreenRecorder(logger: logger)
+        let presenterCameraRecorder = PresenterCameraRecorder()
         let runtimeInfo = AppRuntimeInfo.current
 
         return AppEnvironment(
             preferencesStore: preferencesStore,
             permissionManager: permissionManager,
             screenRecorder: screenRecorder,
+            presenterCameraRecorder: presenterCameraRecorder,
             eventMonitor: eventMonitor,
             cameraPlanEngine: cameraPlanEngine,
             projectStore: projectStore,

@@ -989,6 +989,40 @@ struct RenderLayout {
     }
 }
 
+struct PresenterExportOverlayPlan: Equatable {
+    let sourceVideoURL: URL
+    let layout: PresenterOverlayLayout
+    let timestamp: TimeInterval
+    let shadowOpacity: Double
+
+    static func make(
+        for project: RecordingProject,
+        layout renderLayout: RenderLayout,
+        sourceTimestamp: TimeInterval,
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> PresenterExportOverlayPlan? {
+        let style = project.style.presenterBubbleStyle
+        guard style.isEnabled, let media = project.presenterMedia, let sourceVideoURL = media.sourceVideoURL else {
+            return nil
+        }
+
+        guard fileExists(sourceVideoURL) else { return nil }
+
+        let overlayLayout = PresenterOverlayGeometry.layout(
+            contentRect: renderLayout.contentRect,
+            style: style
+        )
+        guard overlayLayout.frame.isEmpty == false else { return nil }
+
+        return PresenterExportOverlayPlan(
+            sourceVideoURL: sourceVideoURL,
+            layout: overlayLayout,
+            timestamp: max(sourceTimestamp + media.renderOffset, 0),
+            shadowOpacity: style.shadowOpacity
+        )
+    }
+}
+
 private struct PreparedRenderAssets {
     let layout: RenderLayout
     let backgroundImage: CIImage
@@ -1008,6 +1042,19 @@ private struct ComposedSourceFrame {
 private struct DebugRenderedFrame {
     let presentationTime: CMTime
     let image: CGImage
+}
+
+private final class PreparedPresenterExportOverlay {
+    let generator: AVAssetImageGenerator
+
+    init(sourceVideoURL: URL, maximumSize: CGSize, tolerance: CMTime) {
+        let asset = AVURLAsset(url: sourceVideoURL)
+        generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = maximumSize
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+    }
 }
 
 private final class ExportSessionBox: @unchecked Sendable {
@@ -1184,11 +1231,28 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         let time = CMTime(seconds: clampedTimestamp, preferredTimescale: 600)
         let sourceFrame = try await generateSourceFrame(from: generator, at: time)
+        let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
+        let presenterPlan = PresenterExportOverlayPlan.make(
+            for: project,
+            layout: preparedAssets.layout,
+            sourceTimestamp: clampedTimestamp
+        )
+        let presenterFrame: CGImage?
+        if let presenterPlan {
+            let presenterGenerator = PreparedPresenterExportOverlay(
+                sourceVideoURL: presenterPlan.sourceVideoURL,
+                maximumSize: presenterPlan.layout.frame.size,
+                tolerance: sourceFrameSeekTolerance
+            ).generator
+            let presenterTime = CMTime(seconds: presenterPlan.timestamp, preferredTimescale: 600)
+            presenterFrame = try? await generateSourceFrame(from: presenterGenerator, at: presenterTime)
+        } else {
+            presenterFrame = nil
+        }
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 let sourceImage = CIImage(cgImage: sourceFrame)
-                let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
                 let composedFrame = composeFrame(
                     from: sourceImage,
                     snapshot: snapshot,
@@ -1196,8 +1260,14 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     project: project,
                     preparedAssets: preparedAssets
                 )
+                let frameWithPresenter = applyPresenterOverlay(
+                    to: composedFrame,
+                    presenterFrame: presenterFrame,
+                    plan: presenterPlan,
+                    layout: preparedAssets.layout
+                )
 
-                guard let outputImage = ciContext.createCGImage(composedFrame, from: preparedAssets.layout.fullRect) else {
+                guard let outputImage = ciContext.createCGImage(frameWithPresenter, from: preparedAssets.layout.fullRect) else {
                     continuation.resume(throwing: VideoRendererError.unableToCreateContext)
                     return
                 }
@@ -1529,10 +1599,29 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         // A small tolerance keeps export aligned while avoiding decode/open failures.
         generator.requestedTimeToleranceBefore = sourceFrameSeekTolerance
         generator.requestedTimeToleranceAfter = sourceFrameSeekTolerance
+        let preparedPresenterOverlay = makePreparedPresenterExportOverlay(
+            for: project,
+            layout: preparedAssets.layout
+        )
 
         try await forEachRenderFrameTiming(in: clipSegments, frameRate: frameRate) { timing in
             let sourceTime = CMTime(seconds: timing.timestamp, preferredTimescale: 600)
             let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
+            let presenterPlan = PresenterExportOverlayPlan.make(
+                for: project,
+                layout: preparedAssets.layout,
+                sourceTimestamp: timing.timestamp
+            )
+            let presenterFrame: CGImage?
+            if let preparedPresenterOverlay, let presenterPlan {
+                let presenterTime = CMTime(seconds: presenterPlan.timestamp, preferredTimescale: 600)
+                presenterFrame = try? await generateSourceFrame(
+                    from: preparedPresenterOverlay.generator,
+                    at: presenterTime
+                )
+            } else {
+                presenterFrame = nil
+            }
             try Task.checkCancellation()
 
             let composedFrame = try autoreleasepool {
@@ -1541,6 +1630,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     at: timing.timestamp,
                     project: project,
                     preparedAssets: preparedAssets,
+                    presenterPlan: presenterPlan,
+                    presenterFrame: presenterFrame,
                     includesCursor: includesCursor,
                     includesClickFeedback: includesClickFeedback
                 )
@@ -1847,6 +1938,21 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
     }
 
+    private func makePreparedPresenterExportOverlay(
+        for project: RecordingProject,
+        layout: RenderLayout
+    ) -> PreparedPresenterExportOverlay? {
+        guard let plan = PresenterExportOverlayPlan.make(for: project, layout: layout, sourceTimestamp: 0) else {
+            return nil
+        }
+
+        return PreparedPresenterExportOverlay(
+            sourceVideoURL: plan.sourceVideoURL,
+            maximumSize: plan.layout.frame.size,
+            tolerance: sourceFrameSeekTolerance
+        )
+    }
+
     private func composeFrame(
         from sourceImage: CIImage,
         snapshot: FrameSnapshot,
@@ -1931,6 +2037,8 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         at timestamp: TimeInterval,
         project: RecordingProject,
         preparedAssets: PreparedRenderAssets,
+        presenterPlan: PresenterExportOverlayPlan? = nil,
+        presenterFrame: CGImage? = nil,
         includesCursor: Bool,
         includesClickFeedback: Bool
     ) throws -> CIImage {
@@ -1943,7 +2051,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         )
         let pointerSnapshot = pointerTimeline.snapshot(at: timestamp, from: project.events, smoothing: .raw)
 
-        return composeFrame(
+        let composedFrame = composeFrame(
             from: sourceImage,
             snapshot: snapshot,
             pointerSnapshot: pointerSnapshot,
@@ -1951,6 +2059,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             preparedAssets: preparedAssets,
             includesCursor: includesCursor,
             includesClickFeedback: includesClickFeedback
+        )
+
+        return applyPresenterOverlay(
+            to: composedFrame,
+            presenterFrame: presenterFrame,
+            plan: presenterPlan,
+            layout: preparedAssets.layout
         )
         .cropped(to: preparedAssets.layout.fullRect)
     }
@@ -1966,6 +2081,74 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
     private func coreImagePoint(fromTopOriginPoint point: CGPoint, in fullRect: CGRect) -> CGPoint {
         CGPoint(x: point.x, y: fullRect.height - point.y)
+    }
+
+    private func applyPresenterOverlay(
+        to image: CIImage,
+        presenterFrame: CGImage?,
+        plan: PresenterExportOverlayPlan?,
+        layout: RenderLayout
+    ) -> CIImage {
+        guard let presenterFrame, let plan else { return image }
+
+        let ciFrame = coreImageRect(fromTopOriginRect: plan.layout.frame, in: layout.fullRect)
+        guard ciFrame.width > 0, ciFrame.height > 0 else { return image }
+
+        let presenterImage = CIImage(cgImage: presenterFrame)
+        let scale = max(
+            ciFrame.width / max(presenterImage.extent.width, 1),
+            ciFrame.height / max(presenterImage.extent.height, 1)
+        )
+        let scaled = presenterImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let translated = scaled.transformed(
+            by: CGAffineTransform(
+                translationX: ciFrame.midX - scaled.extent.midX,
+                y: ciFrame.midY - scaled.extent.midY
+            )
+        )
+        let clearFrame = CIImage(color: .clear).cropped(to: ciFrame)
+        let clearCanvas = CIImage(color: .clear).cropped(to: layout.fullRect)
+        let presenterCanvas = translated
+            .composited(over: clearFrame)
+            .cropped(to: ciFrame)
+            .composited(over: clearCanvas)
+            .cropped(to: layout.fullRect)
+
+        let mask = makeRoundedMaskImage(
+            size: layout.renderSize,
+            contentRect: ciFrame,
+            cornerRadius: plan.layout.clippingPathCornerRadius
+        )
+        let clippedPresenter = presenterCanvas.applyingFilter(
+            "CIBlendWithMask",
+            parameters: [
+                kCIInputBackgroundImageKey: clearCanvas,
+                kCIInputMaskImageKey: mask
+            ]
+        )
+
+        let shadowOpacity = plan.shadowOpacity.clamped(to: 0...1)
+        guard shadowOpacity > 0 else {
+            return clippedPresenter.composited(over: image)
+        }
+
+        let shadowBase = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: shadowOpacity * 0.45))
+            .cropped(to: layout.fullRect)
+        let shadowShape = shadowBase.applyingFilter(
+            "CIBlendWithMask",
+            parameters: [
+                kCIInputBackgroundImageKey: clearCanvas,
+                kCIInputMaskImageKey: mask
+            ]
+        )
+        let shadow = shadowShape
+            .applyingFilter(
+                "CIGaussianBlur",
+                parameters: [kCIInputRadiusKey: max(ciFrame.width, ciFrame.height) * 0.045]
+            )
+            .cropped(to: layout.fullRect)
+
+        return clippedPresenter.composited(over: shadow.composited(over: image))
     }
 
     private func makeBackgroundImage(

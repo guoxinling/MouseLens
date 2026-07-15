@@ -184,6 +184,12 @@ struct PreviewCanvasView: View {
                 snapshot: frameSnapshot,
                 preservesFullSourceAtBase: project.captureTarget == .window
             )
+            let presenterStyle = project.style.presenterBubbleStyle
+            let presenterLayout = PresenterOverlayGeometry.layout(
+                contentRect: contentRect,
+                style: presenterStyle
+            )
+            let presenterVideoURL = presenterStyle.isEnabled ? project.presenterMedia?.sourceVideoURL : nil
             let cornerRadius = max(project.style.cornerRadius, 0)
 
             ZStack {
@@ -200,6 +206,10 @@ struct PreviewCanvasView: View {
                         realtimeGeometry: previewGeometry,
                         contentCornerRadius: cornerRadius,
                         showsReconstructedCursor: project.reconstructsCursor,
+                        presenterVideoURL: presenterVideoURL,
+                        presenterSeekTime: max(sourceTimestamp + (project.presenterMedia?.renderOffset ?? 0), 0),
+                        presenterLayout: presenterLayout.frame.isEmpty ? nil : presenterLayout,
+                        presenterShadowOpacity: presenterStyle.shadowOpacity,
                         onDisplaySeekRequested: { displayTime in
                             onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
                         },
@@ -511,6 +521,10 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     var realtimeGeometry: RealtimePreviewGeometry?
     var contentCornerRadius: CGFloat = 0
     var showsReconstructedCursor = false
+    var presenterVideoURL: URL?
+    var presenterSeekTime: TimeInterval = 0
+    var presenterLayout: PresenterOverlayLayout?
+    var presenterShadowOpacity: Double = 0
     let onDisplaySeekRequested: (TimeInterval) -> Void
     let onPlaybackTimeChange: (TimeInterval) -> Void
     let onPlaybackEnded: () -> Void
@@ -536,6 +550,18 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
             cornerRadius: contentCornerRadius,
             showsCursor: showsReconstructedCursor
         )
+        context.coordinator.presenterRenderOffset = presenterSeekTime - seekTime
+        nsView.updatePresenterOverlay(
+            url: presenterVideoURL,
+            seekTime: presenterSeekTime,
+            layout: presenterLayout,
+            shadowOpacity: presenterShadowOpacity,
+            renderOffset: context.coordinator.presenterRenderOffset,
+            shouldSeek: context.coordinator.shouldSeekPresenterDuringUpdate(
+                mainSeekTime: seekTime,
+                player: nsView.playerView.player
+            )
+        )
         nsView.updatePlaybackControls(
             timeline: playbackTimeline,
             displayTime: displayTime,
@@ -556,6 +582,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
             seek(
                 player: player,
                 coordinator: context.coordinator,
+                container: nsView,
                 to: seekTime,
                 force: true,
                 resumePlayback: shouldResumePlayback
@@ -567,6 +594,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
             seek(
                 player: player,
                 coordinator: context.coordinator,
+                container: nsView,
                 to: seekTime,
                 force: false,
                 resumePlayback: false
@@ -582,6 +610,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     private func seek(
         player: AVPlayer,
         coordinator: Coordinator,
+        container: StablePlayerContainerView,
         to timestamp: TimeInterval,
         force: Bool,
         resumePlayback: Bool
@@ -624,6 +653,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 if resumePlayback {
                     player.play()
                 }
+                container.syncPresenterPlaybackState()
             }
         }
     }
@@ -639,6 +669,15 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
         var onPlaybackTimeChange: ((TimeInterval) -> Void)?
         var onPlaybackEnded: (() -> Void)?
         var playbackTimeline: PreviewPlaybackTimeline?
+        var presenterRenderOffset: TimeInterval = 0
+
+        func shouldSeekPresenterDuringUpdate(mainSeekTime: TimeInterval, player: AVPlayer?) -> Bool {
+            guard let player else { return true }
+            let safeSeekTime = max(mainSeekTime, 0)
+            guard player.rate != 0 else { return true }
+            guard lastPlaybackReportTime >= 0 else { return true }
+            return abs(lastPlaybackReportTime - safeSeekTime) > 0.12
+        }
 
         func attachTimeObserver(to player: AVPlayer, container: StablePlayerContainerView) {
             observedPlayer = player
@@ -652,6 +691,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 self.seekTime = seconds
                 self.lastPlaybackReportTime = seconds
                 container?.updatePlaybackProgress(sourceTime: seconds)
+                container?.updatePresenterProgress(sourceTime: seconds + self.presenterRenderOffset)
                 self.onPlaybackTimeChange?(seconds)
             }
         }
@@ -677,6 +717,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
             ) { [weak self, weak player, weak container] _ in
                 guard let self, let player else { return }
                 player.pause()
+                container?.syncPresenterPlaybackState()
                 DispatchQueue.main.async { [weak self, weak container] in
                     guard let self else { return }
                     self.seekTime = 0
@@ -694,10 +735,14 @@ private final class StablePlayerContainerView: NSView {
     private let videoClipView = FlippedVideoClipView()
     private let videoClipMaskLayer = CAShapeLayer()
     private let cursorOverlayView = CursorOverlayView()
+    private let presenterOverlayView = PresenterBubblePlayerView()
     private let controlsView = PlaybackControlsView()
     private var realtimeGeometry: RealtimePreviewGeometry?
     private var contentCornerRadius: CGFloat = 0
     private var playbackTimeline: PreviewPlaybackTimeline?
+    private var presenterLayout: PresenterOverlayLayout?
+    private var presenterVideoURL: URL?
+    private var presenterRenderOffset: TimeInterval = 0
 
     override var isFlipped: Bool { true }
 
@@ -719,13 +764,18 @@ private final class StablePlayerContainerView: NSView {
         playerView.translatesAutoresizingMaskIntoConstraints = true
 
         cursorOverlayView.translatesAutoresizingMaskIntoConstraints = true
+        presenterOverlayView.translatesAutoresizingMaskIntoConstraints = true
 
         controlsView.translatesAutoresizingMaskIntoConstraints = true
 
         addSubview(videoClipView)
         videoClipView.addSubview(playerView)
         addSubview(cursorOverlayView)
+        addSubview(presenterOverlayView)
         addSubview(controlsView)
+        controlsView.onPlaybackCommand = { [weak self] in
+            self?.syncPresenterPlaybackState()
+        }
 
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -761,7 +811,9 @@ private final class StablePlayerContainerView: NSView {
         } else {
             playerView.frame = videoClipView.bounds
         }
+        applyPresenterGeometry()
         controlsView.layer?.zPosition = 100
+        presenterOverlayView.layer?.zPosition = 75
         cursorOverlayView.layer?.zPosition = 50
     }
 
@@ -769,6 +821,7 @@ private final class StablePlayerContainerView: NSView {
         playerView.player = player
         controlsView.player = player
         controlsView.updateState()
+        syncPresenterPlaybackState()
     }
 
     func updatePlaybackControls(
@@ -780,7 +833,14 @@ private final class StablePlayerContainerView: NSView {
         controlsView.updateTimeline(
             displayTime: displayTime,
             displayDuration: timeline.displayDuration,
-            onSeekRequested: onSeekRequested
+            onSeekRequested: { [weak self] displayTime in
+                if let self {
+                    let presenterTime = timeline.sourceTime(forDisplayTime: displayTime) + self.presenterRenderOffset
+                    self.seekPresenter(to: presenterTime)
+                    self.syncPresenterPlaybackState()
+                }
+                onSeekRequested(displayTime)
+            }
         )
         controlsView.updateState()
     }
@@ -813,6 +873,43 @@ private final class StablePlayerContainerView: NSView {
         controlsView.updateState()
     }
 
+    func updatePresenterOverlay(
+        url: URL?,
+        seekTime: TimeInterval,
+        layout: PresenterOverlayLayout?,
+        shadowOpacity: Double,
+        renderOffset: TimeInterval,
+        shouldSeek: Bool
+    ) {
+        presenterLayout = layout
+        presenterRenderOffset = renderOffset
+
+        let didChangeURL = presenterVideoURL != url
+        if didChangeURL {
+            presenterVideoURL = url
+            if let url {
+                let player = AVPlayer(url: url)
+                player.actionAtItemEnd = .pause
+                presenterOverlayView.player = player
+            } else {
+                presenterOverlayView.player = nil
+            }
+        }
+
+        presenterOverlayView.cornerRadius = layout?.clippingPathCornerRadius ?? 0
+        presenterOverlayView.shadowOpacity = CGFloat(shadowOpacity.clamped(to: 0...1))
+        applyPresenterGeometry()
+        if didChangeURL || shouldSeek {
+            seekPresenter(to: seekTime)
+        }
+        syncPresenterPlaybackState()
+    }
+
+    func updatePresenterProgress(sourceTime: TimeInterval) {
+        correctPresenterDrift(toward: sourceTime)
+        syncPresenterPlaybackState()
+    }
+
     func updatePlaybackProgress(sourceTime: TimeInterval) {
         if let playbackTimeline {
             controlsView.updateDisplayTime(playbackTimeline.displayTime(forPlaybackTime: sourceTime))
@@ -823,6 +920,21 @@ private final class StablePlayerContainerView: NSView {
     func updatePlaybackProgress(displayTime: TimeInterval) {
         controlsView.updateDisplayTime(displayTime)
         controlsView.updateState()
+    }
+
+    func syncPresenterPlaybackState() {
+        guard let presenterPlayer = presenterOverlayView.player else { return }
+        guard let mainPlayer = playerView.player else {
+            presenterPlayer.pause()
+            return
+        }
+
+        let mainRate = mainPlayer.rate
+        if mainRate == 0 {
+            presenterPlayer.pause()
+        } else if presenterPlayer.rate != mainRate {
+            presenterPlayer.rate = mainRate
+        }
     }
 
     private func applyVideoGeometry() {
@@ -842,6 +954,38 @@ private final class StablePlayerContainerView: NSView {
             transform: nil
         )
     }
+
+    private func applyPresenterGeometry() {
+        guard let layout = presenterLayout, presenterVideoURL != nil else {
+            presenterOverlayView.frame = .zero
+            presenterOverlayView.isHidden = true
+            return
+        }
+
+        presenterOverlayView.isHidden = false
+        presenterOverlayView.frame = layout.frame
+    }
+
+    private func seekPresenter(to timestamp: TimeInterval) {
+        guard let player = presenterOverlayView.player else { return }
+        let safeTimestamp = max(timestamp, 0)
+        let currentTime = CMTimeGetSeconds(player.currentTime())
+        guard !currentTime.isFinite || abs(currentTime - safeTimestamp) > 0.08 else { return }
+
+        player.seek(
+            to: CMTime(seconds: safeTimestamp, preferredTimescale: 600),
+            toleranceBefore: CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600),
+            toleranceAfter: CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
+        )
+    }
+
+    private func correctPresenterDrift(toward timestamp: TimeInterval) {
+        guard let player = presenterOverlayView.player else { return }
+        let safeTimestamp = max(timestamp, 0)
+        let currentTime = CMTimeGetSeconds(player.currentTime())
+        guard !currentTime.isFinite || abs(currentTime - safeTimestamp) > 0.75 else { return }
+        seekPresenter(to: safeTimestamp)
+    }
 }
 
 private final class FlippedVideoClipView: NSView {
@@ -854,8 +998,64 @@ private final class StableAVPlayerView: AVPlayerView {
     }
 }
 
+private final class PresenterBubblePlayerView: AVPlayerView {
+    private let maskLayer = CAShapeLayer()
+    var cornerRadius: CGFloat = 0 {
+        didSet { updateMask() }
+    }
+    var shadowOpacity: CGFloat = 0 {
+        didSet { updateShadow() }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        controlsStyle = .none
+        videoGravity = .resizeAspectFill
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.masksToBounds = false
+        layer?.mask = maskLayer
+        translatesAutoresizingMaskIntoConstraints = true
+        updateShadow()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override func layout() {
+        super.layout()
+        updateMask()
+    }
+
+    private func updateMask() {
+        maskLayer.frame = bounds
+        maskLayer.path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+    }
+
+    private func updateShadow() {
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = Float(shadowOpacity)
+        layer?.shadowRadius = 12
+        layer?.shadowOffset = CGSize(width: 0, height: 5)
+    }
+}
+
 private final class PlaybackControlsView: NSView {
     weak var player: AVPlayer?
+    var onPlaybackCommand: (() -> Void)?
 
     private let playPauseButton = NSButton()
     private let currentTimeLabel = NSTextField(labelWithString: "00:00.00")
@@ -960,6 +1160,7 @@ private final class PlaybackControlsView: NSView {
         } else {
             player.pause()
         }
+        onPlaybackCommand?()
         updateState()
     }
 

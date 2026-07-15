@@ -1,8 +1,210 @@
+import AVFoundation
 import CoreGraphics
+import CoreImage
+import ImageIO
 import XCTest
 @testable import MouseLens
 
 final class SourceCropPlannerTests: XCTestCase {
+    func testMP4ExportComposesPresenterBubbleOverSourceVideo() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let presenterURL = directory.appendingPathComponent("presenter.mp4")
+        let outputURL = directory.appendingPathComponent("output.mp4")
+        try Self.writeSolidVideo(to: sourceURL, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        try Self.writeSolidVideo(to: presenterURL, color: CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            position: .topLeft,
+            normalizedSize: 0.22,
+            shape: .roundedRect,
+            cornerRadius: 8,
+            shadowOpacity: 0
+        )
+        let project = Self.project(
+            sourceVideoURL: sourceURL,
+            style: .testValue(replacingPresenterBubbleStyleWith: style),
+            presenterMedia: PresenterMedia(
+                sourceVideoURL: presenterURL,
+                startedAt: nil,
+                renderOffset: 0,
+                naturalSize: CGSize(width: 64, height: 36)
+            )
+        )
+        let configuration = ExportConfiguration(
+            format: .mp4,
+            resolution: .p480,
+            frameRate: .fps15,
+            quality: .small,
+            includesCursor: false,
+            includesClickFeedback: false
+        )
+
+        _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
+
+        let frame = try Self.firstVideoFrame(from: outputURL)
+        let samplePoint = Self.presenterSamplePoint(style: style, renderSize: configuration.renderSize(for: .landscape))
+        let pixel = try Self.pixel(in: frame, atTopOriginPoint: samplePoint)
+        XCTAssertGreaterThan(pixel.red, 0.72)
+        XCTAssertLessThan(pixel.blue, 0.28)
+    }
+
+    func testGIFExportComposesPresenterBubbleOverSourceVideo() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let presenterURL = directory.appendingPathComponent("presenter.mp4")
+        let outputURL = directory.appendingPathComponent("output.gif")
+        try Self.writeSolidVideo(to: sourceURL, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        try Self.writeSolidVideo(to: presenterURL, color: CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            position: .topRight,
+            normalizedSize: 0.2,
+            shape: .circle,
+            cornerRadius: 0,
+            shadowOpacity: 0
+        )
+        let project = Self.project(
+            sourceVideoURL: sourceURL,
+            style: .testValue(replacingPresenterBubbleStyleWith: style),
+            presenterMedia: PresenterMedia(
+                sourceVideoURL: presenterURL,
+                startedAt: nil,
+                renderOffset: 0,
+                naturalSize: CGSize(width: 64, height: 36)
+            )
+        )
+        var configuration = ExportConfiguration.recommended(for: .landscape, format: .gif)
+        configuration.resolution = .p720
+
+        _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
+
+        let frame = try Self.firstGIFFrame(from: outputURL)
+        let samplePoint = Self.presenterSamplePoint(style: style, renderSize: configuration.renderSize(for: .landscape))
+        let pixel = try Self.pixel(in: frame, atTopOriginPoint: samplePoint)
+        XCTAssertGreaterThan(pixel.red, 0.72)
+        XCTAssertLessThan(pixel.blue, 0.28)
+    }
+
+    func testExportFallsBackWhenPresenterFrameCannotDecode() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let presenterURL = directory.appendingPathComponent("invalid-presenter.mp4")
+        let outputURL = directory.appendingPathComponent("output.mp4")
+        try Self.writeSolidVideo(to: sourceURL, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+        try Data("not a movie".utf8).write(to: presenterURL)
+
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            position: .topLeft,
+            normalizedSize: 0.22,
+            shape: .roundedRect,
+            cornerRadius: 8,
+            shadowOpacity: 0
+        )
+        let project = Self.project(
+            sourceVideoURL: sourceURL,
+            style: .testValue(replacingPresenterBubbleStyleWith: style),
+            presenterMedia: PresenterMedia(
+                sourceVideoURL: presenterURL,
+                startedAt: nil,
+                renderOffset: 0,
+                naturalSize: CGSize(width: 64, height: 36)
+            )
+        )
+        let configuration = ExportConfiguration(
+            format: .mp4,
+            resolution: .p480,
+            frameRate: .fps15,
+            quality: .small,
+            includesCursor: false,
+            includesClickFeedback: false
+        )
+
+        _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
+
+        let frame = try Self.firstVideoFrame(from: outputURL)
+        let samplePoint = Self.presenterSamplePoint(style: style, renderSize: configuration.renderSize(for: .landscape))
+        let pixel = try Self.pixel(in: frame, atTopOriginPoint: samplePoint)
+        XCTAssertGreaterThan(pixel.blue, 0.72)
+        XCTAssertLessThan(pixel.red, 0.28)
+    }
+
+    func testPresenterExportPlanUsesOverlayGeometryAndOffsetTimestamp() throws {
+        let presenterURL = URL(fileURLWithPath: "/tmp/presenter.mov")
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            position: .topLeft,
+            normalizedSize: 0.2,
+            shape: .roundedRect,
+            cornerRadius: 22,
+            shadowOpacity: 0.31
+        )
+        let project = Self.project(
+            style: .testValue(replacingPresenterBubbleStyleWith: style),
+            presenterMedia: PresenterMedia(
+                sourceVideoURL: presenterURL,
+                startedAt: Date(timeIntervalSince1970: 2),
+                renderOffset: -1.25,
+                naturalSize: CGSize(width: 1280, height: 720)
+            )
+        )
+        let layout = RenderLayout(renderSize: CGSize(width: 1920, height: 1080), padding: 0.08)
+
+        let plan = try XCTUnwrap(PresenterExportOverlayPlan.make(
+            for: project,
+            layout: layout,
+            sourceTimestamp: 0.5,
+            fileExists: { $0 == presenterURL }
+        ))
+
+        XCTAssertEqual(plan.sourceVideoURL, presenterURL)
+        XCTAssertEqual(plan.layout, PresenterOverlayGeometry.layout(contentRect: layout.contentRect, style: style))
+        XCTAssertEqual(plan.timestamp, 0, accuracy: 0.0001)
+        XCTAssertEqual(plan.shadowOpacity, 0.31, accuracy: 0.0001)
+    }
+
+    func testPresenterExportPlanSkipsUnavailablePresenterBubbleInputs() {
+        let presenterURL = URL(fileURLWithPath: "/tmp/presenter.mov")
+        let enabledStyle = PresenterBubbleStyle.defaultValue
+        let disabledStyle = PresenterBubbleStyle(
+            isEnabled: false,
+            position: .bottomRight,
+            normalizedSize: 0.26,
+            shape: .circle,
+            cornerRadius: 18,
+            shadowOpacity: 0.24
+        )
+        let layout = RenderLayout(renderSize: CGSize(width: 1920, height: 1080), padding: 0.08)
+        let media = PresenterMedia(
+            sourceVideoURL: presenterURL,
+            startedAt: nil,
+            renderOffset: 0.2,
+            naturalSize: CGSize(width: 1280, height: 720)
+        )
+
+        XCTAssertNil(PresenterExportOverlayPlan.make(
+            for: Self.project(style: .testValue(replacingPresenterBubbleStyleWith: disabledStyle), presenterMedia: media),
+            layout: layout,
+            sourceTimestamp: 1,
+            fileExists: { _ in true }
+        ))
+        XCTAssertNil(PresenterExportOverlayPlan.make(
+            for: Self.project(style: .testValue(replacingPresenterBubbleStyleWith: enabledStyle), presenterMedia: nil),
+            layout: layout,
+            sourceTimestamp: 1,
+            fileExists: { _ in true }
+        ))
+        XCTAssertNil(PresenterExportOverlayPlan.make(
+            for: Self.project(style: .testValue(replacingPresenterBubbleStyleWith: enabledStyle), presenterMedia: media),
+            layout: layout,
+            sourceTimestamp: 1,
+            fileExists: { _ in false }
+        ))
+    }
+
     func testBaseCropKeepsRequestedAspectRatioCentered() {
         let planner = SourceCropPlanner()
         let source = CGRect(x: 0, y: 0, width: 1920, height: 1080)
@@ -376,6 +578,177 @@ final class SourceCropPlannerTests: XCTestCase {
 
         XCTAssertGreaterThan(geometry.videoFrame.width, contentRect.width)
         XCTAssertGreaterThan(geometry.videoFrame.height, contentRect.height)
+    }
+
+    private static func project(
+        sourceVideoURL: URL = URL(fileURLWithPath: "/tmp/source.mov"),
+        style: ProjectStyle,
+        presenterMedia: PresenterMedia?
+    ) -> RecordingProject {
+        RecordingProject(
+            id: UUID(),
+            name: "Presenter Export",
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 6,
+            sourceVideoURL: sourceVideoURL,
+            captureTarget: .screen,
+            reconstructsCursor: true,
+            events: [],
+            cameraKeyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1)],
+            style: style,
+            presenterMedia: presenterMedia
+        )
+    }
+
+    private static func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private static func writeSolidVideo(
+        to url: URL,
+        color: CGColor,
+        size: CGSize = CGSize(width: 64, height: 36),
+        frameRate: Int32 = 15,
+        frameCount: Int = 4
+    ) throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let settings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height)
+        ]
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: Int(size.width),
+                kCVPixelBufferHeightKey as String: Int(size.height)
+            ]
+        )
+
+        XCTAssertTrue(writer.canAdd(input))
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        for frameIndex in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.001)
+            }
+            guard let buffer = makePixelBuffer(size: size, color: color) else {
+                throw VideoRendererError.unableToCreatePixelBuffer
+            }
+            let time = CMTime(value: CMTimeValue(frameIndex), timescale: frameRate)
+            XCTAssertTrue(adaptor.append(buffer, withPresentationTime: time))
+        }
+
+        input.markAsFinished()
+        let expectation = XCTestExpectation(description: "finish writing solid video")
+        writer.finishWriting {
+            expectation.fulfill()
+        }
+        _ = XCTWaiter.wait(for: [expectation], timeout: 5)
+        if writer.status != .completed {
+            throw writer.error ?? VideoRendererError.writerFailed
+        }
+    }
+
+    private static func makePixelBuffer(size: CGSize, color: CGColor) -> CVPixelBuffer? {
+        var buffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            nil,
+            Int(size.width),
+            Int(size.height),
+            kCVPixelFormatType_32BGRA,
+            nil,
+            &buffer
+        )
+        guard status == kCVReturnSuccess, let buffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+
+        guard let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer),
+            width: Int(size.width),
+            height: Int(size.height),
+            bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else {
+            return nil
+        }
+        context.setFillColor(color)
+        context.fill(CGRect(origin: .zero, size: size))
+        return buffer
+    }
+
+    private static func firstVideoFrame(from url: URL) throws -> CGImage {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        return try generator.copyCGImage(at: .zero, actualTime: nil)
+    }
+
+    private static func firstGIFFrame(from url: URL) throws -> CGImage {
+        guard
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let frame = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            throw VideoRendererError.exportFailed
+        }
+        return frame
+    }
+
+    private static func presenterSamplePoint(style: PresenterBubbleStyle, renderSize: CGSize) -> CGPoint {
+        let layout = PresenterOverlayGeometry.layout(
+            contentRect: RenderLayout(renderSize: renderSize, padding: 0.08).contentRect,
+            style: style
+        )
+        return CGPoint(x: layout.frame.midX, y: layout.frame.midY)
+    }
+
+    private static func pixel(in image: CGImage, atTopOriginPoint point: CGPoint) throws -> (red: Double, green: Double, blue: Double) {
+        let ciImage = CIImage(cgImage: image)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        let x = point.x.rounded(.down).clamped(to: 0...CGFloat(max(image.width - 1, 0)))
+        let y = (CGFloat(image.height) - point.y.rounded(.down) - 1).clamped(to: 0...CGFloat(max(image.height - 1, 0)))
+        var pixel = [UInt8](repeating: 0, count: 4)
+        context.render(
+            ciImage.cropped(to: CGRect(x: x, y: y, width: 1, height: 1)),
+            toBitmap: &pixel,
+            rowBytes: 4,
+            bounds: CGRect(x: x, y: y, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return (
+            red: Double(pixel[0]) / 255.0,
+            green: Double(pixel[1]) / 255.0,
+            blue: Double(pixel[2]) / 255.0
+        )
+    }
+}
+
+private extension ProjectStyle {
+    static func testValue(replacingPresenterBubbleStyleWith presenterBubbleStyle: PresenterBubbleStyle) -> ProjectStyle {
+        ProjectStyle(
+            aspectRatio: .landscape,
+            backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+            cornerRadius: 26,
+            shadowRadius: 18,
+            followStrength: 0.6,
+            clickEmphasis: 0.7,
+            padding: 0.08,
+            presenterBubbleStyle: presenterBubbleStyle
+        )
     }
 }
 

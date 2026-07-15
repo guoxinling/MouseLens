@@ -117,4 +117,9 @@ final class HomeViewModelWindowTargetTests: XCTestCase {
             .preferCurrentWindow
         )
     }
+
+    func testDefaultPresenterBubbleStyleFollowsCapturedMediaAvailability() {
+        XCTAssertTrue(HomeViewModel.defaultPresenterBubbleStyle(isEnabled: true).isEnabled)
+        XCTAssertFalse(HomeViewModel.defaultPresenterBubbleStyle(isEnabled: false).isEnabled)
+    }
 }

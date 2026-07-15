@@ -39,6 +39,43 @@ enum ProjectBackgroundStyle: String, Codable, CaseIterable {
     }
 }
 
+enum PresenterBubblePosition: String, CaseIterable, Codable {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
+}
+
+enum PresenterBubbleShape: String, CaseIterable, Codable {
+    case circle
+    case roundedRect
+}
+
+struct PresenterBubbleStyle: Codable, Equatable {
+    static let defaultValue = PresenterBubbleStyle(
+        isEnabled: false,
+        position: .bottomRight,
+        normalizedSize: 0.22,
+        shape: .circle,
+        cornerRadius: 18,
+        shadowOpacity: 0.24
+    )
+
+    let isEnabled: Bool
+    let position: PresenterBubblePosition
+    let normalizedSize: Double
+    let shape: PresenterBubbleShape
+    let cornerRadius: Double
+    let shadowOpacity: Double
+}
+
+struct PresenterMedia: Codable, Equatable {
+    let sourceVideoURL: URL?
+    let startedAt: Date?
+    let renderOffset: TimeInterval
+    let naturalSize: CGSize
+}
+
 struct ProjectStyle: Codable, Equatable {
     let aspectRatio: ProjectAspectRatio
     let backgroundPresetID: String
@@ -47,6 +84,7 @@ struct ProjectStyle: Codable, Equatable {
     let followStrength: Double
     let clickEmphasis: Double
     let padding: Double
+    let presenterBubbleStyle: PresenterBubbleStyle
 
     var backgroundPreset: BackgroundPreset {
         BackgroundPresetCatalog.preset(id: backgroundPresetID)
@@ -65,6 +103,7 @@ struct ProjectStyle: Codable, Equatable {
         case followStrength
         case clickEmphasis
         case padding
+        case presenterBubbleStyle
     }
 
     init(
@@ -74,7 +113,8 @@ struct ProjectStyle: Codable, Equatable {
         shadowRadius: Double,
         followStrength: Double,
         clickEmphasis: Double,
-        padding: Double
+        padding: Double,
+        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue
     ) {
         self.aspectRatio = aspectRatio
         self.backgroundPresetID = backgroundPresetID
@@ -83,6 +123,7 @@ struct ProjectStyle: Codable, Equatable {
         self.followStrength = followStrength
         self.clickEmphasis = clickEmphasis
         self.padding = padding
+        self.presenterBubbleStyle = presenterBubbleStyle
     }
 
     init(
@@ -92,7 +133,8 @@ struct ProjectStyle: Codable, Equatable {
         shadowRadius: Double,
         followStrength: Double,
         clickEmphasis: Double,
-        padding: Double
+        padding: Double,
+        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue
     ) {
         self.init(
             aspectRatio: aspectRatio,
@@ -101,7 +143,8 @@ struct ProjectStyle: Codable, Equatable {
             shadowRadius: shadowRadius,
             followStrength: followStrength,
             clickEmphasis: clickEmphasis,
-            padding: padding
+            padding: padding,
+            presenterBubbleStyle: presenterBubbleStyle
         )
     }
 
@@ -123,7 +166,11 @@ struct ProjectStyle: Codable, Equatable {
             shadowRadius: try container.decode(Double.self, forKey: .shadowRadius),
             followStrength: try container.decode(Double.self, forKey: .followStrength),
             clickEmphasis: try container.decode(Double.self, forKey: .clickEmphasis),
-            padding: try container.decode(Double.self, forKey: .padding)
+            padding: try container.decode(Double.self, forKey: .padding),
+            presenterBubbleStyle: try container.decodeIfPresent(
+                PresenterBubbleStyle.self,
+                forKey: .presenterBubbleStyle
+            ) ?? .defaultValue
         )
     }
 
@@ -136,6 +183,7 @@ struct ProjectStyle: Codable, Equatable {
         try container.encode(followStrength, forKey: .followStrength)
         try container.encode(clickEmphasis, forKey: .clickEmphasis)
         try container.encode(padding, forKey: .padding)
+        try container.encode(presenterBubbleStyle, forKey: .presenterBubbleStyle)
     }
 }
 
@@ -298,6 +346,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
     let clipSegments: [ProjectTrimRange]
     let manualZoomSegments: [ManualZoomSegment]
     let zoomTrackEdited: Bool
+    let presenterMedia: PresenterMedia?
 
     var effectiveTrimRange: ProjectTrimRange {
         trimRange.clamped(to: duration)
@@ -328,7 +377,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         trimRange: ProjectTrimRange? = nil,
         clipSegments: [ProjectTrimRange]? = nil,
         manualZoomSegments: [ManualZoomSegment] = [],
-        zoomTrackEdited: Bool = false
+        zoomTrackEdited: Bool = false,
+        presenterMedia: PresenterMedia? = nil
     ) {
         let safeDuration = max(duration, 0)
         let safeTrimRange = (trimRange ?? ProjectTrimRange(start: 0, end: safeDuration)).clamped(to: safeDuration)
@@ -349,6 +399,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         self.clipSegments = Self.normalizedClipSegments(clipSegments ?? [safeTrimRange], duration: safeDuration)
         self.manualZoomSegments = Self.normalizedManualZoomSegments(proposedZoomSegments, duration: safeDuration)
         self.zoomTrackEdited = zoomTrackEdited
+        self.presenterMedia = presenterMedia
     }
 
     enum CodingKeys: String, CodingKey {
@@ -366,6 +417,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         case clipSegments
         case manualZoomSegments
         case zoomTrackEdited
+        case presenterMedia
     }
 
     init(from decoder: any Decoder) throws {
@@ -384,6 +436,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let clipSegments = try container.decodeIfPresent([ProjectTrimRange].self, forKey: .clipSegments)
         let manualZoomSegments = try container.decodeIfPresent([ManualZoomSegment].self, forKey: .manualZoomSegments) ?? []
         let zoomTrackEdited = try container.decodeIfPresent(Bool.self, forKey: .zoomTrackEdited) ?? false
+        let presenterMedia = try container.decodeIfPresent(PresenterMedia.self, forKey: .presenterMedia)
 
         self.init(
             id: id,
@@ -399,7 +452,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             trimRange: trimRange,
             clipSegments: clipSegments,
             manualZoomSegments: manualZoomSegments,
-            zoomTrackEdited: zoomTrackEdited
+            zoomTrackEdited: zoomTrackEdited,
+            presenterMedia: presenterMedia
         )
     }
 
@@ -419,6 +473,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         try container.encode(clipSegments, forKey: .clipSegments)
         try container.encode(manualZoomSegments, forKey: .manualZoomSegments)
         try container.encode(zoomTrackEdited, forKey: .zoomTrackEdited)
+        try container.encodeIfPresent(presenterMedia, forKey: .presenterMedia)
     }
 
     func updating(
@@ -428,7 +483,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         trimRange: ProjectTrimRange? = nil,
         clipSegments: [ProjectTrimRange]? = nil,
         manualZoomSegments: [ManualZoomSegment]? = nil,
-        zoomTrackEdited: Bool? = nil
+        zoomTrackEdited: Bool? = nil,
+        presenterMedia: PresenterMedia? = nil
     ) -> RecordingProject {
         let nextDuration = duration ?? self.duration
         let nextSegments = clipSegments ?? self.clipSegments
@@ -449,7 +505,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             trimRange: nextTrimRange,
             clipSegments: normalizedSegments,
             manualZoomSegments: manualZoomSegments ?? self.manualZoomSegments,
-            zoomTrackEdited: zoomTrackEdited ?? self.zoomTrackEdited
+            zoomTrackEdited: zoomTrackEdited ?? self.zoomTrackEdited,
+            presenterMedia: presenterMedia ?? self.presenterMedia
         )
     }
 
@@ -725,7 +782,8 @@ final class ProjectStore {
         rawEvents: [PointerEvent] = [],
         events: [PointerEvent],
         keyframes: [CameraKeyframe],
-        style: ProjectStyle
+        style: ProjectStyle,
+        presenterMedia: PresenterMedia? = nil
     ) throws -> RecordingProject {
         let createdAt = Date()
         let slug = createdAt.formatted(.dateTime.year().month().day().hour().minute())
@@ -733,6 +791,7 @@ final class ProjectStore {
             .replacingOccurrences(of: " ", with: "_")
             .replacingOccurrences(of: ":", with: "-")
         let persistedSourceURL = try persistSourceMediaIfNeeded(from: session.rawCaptureURL, for: session.id)
+        let persistedPresenterMedia = try persistPresenterMediaIfNeeded(presenterMedia, for: session.id)
         let measuredSourceDuration = sourceDuration(for: persistedSourceURL)
 
         let project = RecordingProject(
@@ -745,7 +804,8 @@ final class ProjectStore {
             reconstructsCursor: true,
             events: events,
             cameraKeyframes: keyframes,
-            style: style
+            style: style,
+            presenterMedia: persistedPresenterMedia
         )
 
         try save(project: project)
@@ -922,6 +982,37 @@ final class ProjectStore {
 
         try fileManager.copyItem(at: sourceURL, to: destinationURL)
         return destinationURL
+    }
+
+    private func persistPresenterMediaIfNeeded(_ media: PresenterMedia?, for id: UUID) throws -> PresenterMedia? {
+        guard let media, let sourceURL = media.sourceVideoURL else { return media }
+
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: sourceURL.path) else {
+            return media
+        }
+
+        let layout = layout(for: id)
+        try fileManager.createDirectory(at: layout.root, withIntermediateDirectories: true, attributes: nil)
+
+        let fileExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
+        let destinationURL = layout.root
+            .appendingPathComponent("presenter", isDirectory: false)
+            .appendingPathExtension(fileExtension)
+
+        if sourceURL.standardizedFileURL != destinationURL.standardizedFileURL {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        }
+
+        return PresenterMedia(
+            sourceVideoURL: destinationURL,
+            startedAt: media.startedAt,
+            renderOffset: media.renderOffset,
+            naturalSize: media.naturalSize
+        )
     }
 
     private func sourceDuration(for sourceURL: URL?) -> TimeInterval? {

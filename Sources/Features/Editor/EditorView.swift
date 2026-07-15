@@ -240,6 +240,11 @@ struct EditorView: View {
                     manualZoomInspector(project: project)
                 }
 
+                if project.presenterMedia != nil {
+                    inspectorSection(title: "Presenter", systemImage: "person.crop.circle") {
+                        presenterInspector
+                    }
+                }
             }
             .padding(20)
         }
@@ -384,6 +389,74 @@ struct EditorView: View {
                 Capsule()
                     .fill(source == .auto ? Color.cyan.opacity(0.55) : Color.orange.opacity(0.62))
             )
+    }
+
+    private var presenterInspector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(
+                "Show Presenter",
+                isOn: Binding(
+                    get: { viewModel.isPresenterBubbleEnabled },
+                    set: { viewModel.updatePresenterBubbleEnabled($0) }
+                )
+            )
+            .toggleStyle(.switch)
+
+            Picker(
+                "Position",
+                selection: Binding(
+                    get: { viewModel.presenterBubblePosition },
+                    set: { viewModel.updatePresenterBubblePosition($0) }
+                )
+            ) {
+                ForEach(PresenterBubblePosition.allCases, id: \.self) { position in
+                    Text(presenterPositionLabel(for: position)).tag(position)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!viewModel.isPresenterBubbleEnabled)
+
+            MetricSlider(
+                label: "Size",
+                value: Binding(
+                    get: { viewModel.presenterBubbleSize },
+                    set: { viewModel.updatePresenterBubbleSize($0) }
+                ),
+                range: 0.12...0.4
+            )
+            .disabled(!viewModel.isPresenterBubbleEnabled)
+
+            Picker(
+                "Shape",
+                selection: Binding(
+                    get: { viewModel.presenterBubbleShape },
+                    set: { viewModel.updatePresenterBubbleShape($0) }
+                )
+            ) {
+                ForEach(PresenterBubbleShape.allCases, id: \.self) { shape in
+                    Text(presenterShapeLabel(for: shape)).tag(shape)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!viewModel.isPresenterBubbleEnabled)
+        }
+        .font(.system(size: 13))
+    }
+
+    private func presenterPositionLabel(for position: PresenterBubblePosition) -> String {
+        switch position {
+        case .topLeft: "Top Left"
+        case .topRight: "Top Right"
+        case .bottomLeft: "Bottom Left"
+        case .bottomRight: "Bottom Right"
+        }
+    }
+
+    private func presenterShapeLabel(for shape: PresenterBubbleShape) -> String {
+        switch shape {
+        case .circle: "Circle"
+        case .roundedRect: "Rounded"
+        }
     }
 
     private var backgroundGrid: some View {

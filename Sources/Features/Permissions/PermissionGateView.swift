@@ -6,6 +6,7 @@ struct PermissionGateView: View {
     @State private var didAutoRequest = false
     @ObservedObject var viewModel: PermissionsViewModel
     let requiresMicrophone: Bool
+    let requiresPresenterCamera: Bool
     let onRequest: () -> Void
     let onGranted: () -> Void
 
@@ -18,6 +19,7 @@ struct PermissionGateView: View {
 
             PermissionRow(label: "Screen Recording", status: viewModel.permissions.screenRecording)
             PermissionRow(label: "Microphone", status: viewModel.permissions.microphone, required: requiresMicrophone)
+            PermissionRow(label: "Camera", status: viewModel.permissions.camera, required: requiresPresenterCamera)
             PermissionRow(label: "Accessibility", status: viewModel.permissions.accessibility, required: false)
 
             HStack {
@@ -51,8 +53,9 @@ struct PermissionGateView: View {
                 Text("Screen Recording looks newly enabled, but macOS still requires you to quit and reopen MouseLens before capture becomes available to this process.")
                     .font(.system(size: 12))
                     .foregroundStyle(.orange)
-            } else if !requiresMicrophone && viewModel.permissions.microphone != .granted {
-                Text("Microphone is off right now, so microphone permission will not block recording.")
+            } else if (!requiresMicrophone && viewModel.permissions.microphone != .granted)
+                        || (!requiresPresenterCamera && viewModel.permissions.camera != .granted) {
+                Text("Microphone and camera permissions only block recording when those inputs are enabled.")
                     .font(.system(size: 12))
                     .foregroundStyle(AppTheme.mutedText)
             }
@@ -72,7 +75,10 @@ struct PermissionGateView: View {
             maybeAutoRequest()
         }
         .onChange(of: viewModel.permissions, initial: false) { _, permissions in
-            guard permissions.recordingReady(requiresMicrophone: requiresMicrophone) else { return }
+            guard permissions.recordingReady(
+                requiresMicrophone: requiresMicrophone,
+                requiresPresenterCamera: requiresPresenterCamera
+            ) else { return }
             completePermissionFlow()
         }
     }
@@ -85,15 +91,22 @@ struct PermissionGateView: View {
     }
 
     private var recordingReady: Bool {
-        viewModel.permissions.recordingReady(requiresMicrophone: requiresMicrophone)
+        viewModel.permissions.recordingReady(
+            requiresMicrophone: requiresMicrophone,
+            requiresPresenterCamera: requiresPresenterCamera
+        )
     }
 
     private var permissionExplanation: String {
-        if requiresMicrophone {
-            return "MouseLens needs screen recording and microphone permissions to record. Accessibility only improves cursor-follow motion."
+        if requiresMicrophone || requiresPresenterCamera {
+            let enabledInputs = [
+                requiresMicrophone ? "microphone" : nil,
+                requiresPresenterCamera ? "camera" : nil
+            ].compactMap { $0 }.joined(separator: " and ")
+            return "MouseLens needs screen recording and \(enabledInputs) permissions to record the enabled inputs. Accessibility only improves cursor-follow motion."
         }
 
-        return "MouseLens needs screen recording permission to record. Accessibility and microphone are optional for this capture setup."
+        return "MouseLens needs screen recording permission to record. Accessibility, microphone, and camera are optional for this capture setup."
     }
 
     private func completePermissionFlow() {

@@ -33,6 +33,12 @@ final class HomeViewModel: ObservableObject {
             environment.preferencesStore.defaultSystemAudioEnabled = includeSystemAudio
         }
     }
+    @Published var includePresenterCamera = false {
+        didSet {
+            guard !isApplyingDefaults else { return }
+            environment.preferencesStore.defaultPresenterCameraEnabled = includePresenterCamera
+        }
+    }
     @Published var selectedAspectRatio: ProjectAspectRatio = .landscape {
         didSet {
             guard !isApplyingDefaults else { return }
@@ -55,6 +61,7 @@ final class HomeViewModel: ObservableObject {
     private var windowTargetRefreshGeneration = 0
     private var loadingWindowTargetRefreshGeneration: Int?
     private var isApplyingDefaults = false
+    private var presenterCameraRecordingStarted = false
     private var cancellables: Set<AnyCancellable> = []
 
     var permissionManager: PermissionManager {
@@ -144,7 +151,8 @@ final class HomeViewModel: ObservableObject {
     func requestPermissions() async {
         await environment.permissionManager.requestMissingPermissions(
             includeMicrophone: includeMicrophone,
-            includeAccessibility: false
+            includeAccessibility: false,
+            includeCamera: includePresenterCamera
         )
         refreshPermissions()
     }
@@ -196,6 +204,7 @@ final class HomeViewModel: ObservableObject {
 
         do {
             let session = try await environment.screenRecorder.stop()
+            let presenterMedia = await stopPresenterCameraIfNeeded()
             let events = environment.eventMonitor.stop()
             let timeAlignedEvents = alignEventTimeline(events, with: session)
             let normalizedEvents = normalize(events: timeAlignedEvents, for: session)
@@ -213,7 +222,10 @@ final class HomeViewModel: ObservableObject {
                 shadowRadius: 0,
                 followStrength: 0.72,
                 clickEmphasis: 0.54,
-                padding: 0.04
+                padding: 0.04,
+                presenterBubbleStyle: Self.defaultPresenterBubbleStyle(
+                    isEnabled: presenterMedia?.sourceVideoURL != nil
+                )
             )
 
             let project = try environment.projectStore.createProject(
@@ -221,7 +233,8 @@ final class HomeViewModel: ObservableObject {
                 rawEvents: events,
                 events: normalizedEvents,
                 keyframes: keyframes,
-                style: style
+                style: style,
+                presenterMedia: presenterMedia
             )
 
             loadRecentProjects()
@@ -233,6 +246,7 @@ final class HomeViewModel: ObservableObject {
             recordingState = .idle
             completedProject = project
         } catch {
+            _ = await stopPresenterCameraIfNeeded()
             recordingState = .idle
             environment.windowController.restoreAfterCapture()
             statusMessage = "Unable to finish recording: \(error.localizedDescription)"
@@ -378,7 +392,10 @@ final class HomeViewModel: ObservableObject {
     }
 
     private var canStartRecording: Bool {
-        permissions.recordingReady(requiresMicrophone: includeMicrophone)
+        permissions.recordingReady(
+            requiresMicrophone: includeMicrophone,
+            requiresPresenterCamera: includePresenterCamera
+        )
     }
 
     private func beginCountdown() async {
@@ -434,11 +451,14 @@ final class HomeViewModel: ObservableObject {
                 includeSystemAudio: includeSystemAudio,
                 preferredWindowID: selectedCaptureTarget == .window ? selectedWindowTargetID : nil
             )
+            let presenterSession = await startPresenterCameraIfAllowed()
             let session = try await environment.screenRecorder.start(configuration: configuration)
+            updatePresenterCameraOffsetIfNeeded(sourceStartedAt: session.startedAt, presenterStartedAt: presenterSession?.startedAt)
             environment.eventMonitor.start(origin: session.startedAt)
             recordingState = .recording(RecordingSessionState(startedAt: session.startedAt))
             statusMessage = "Recording started. Use the floating toolbar to pause or finish."
         } catch {
+            cancelPresenterCameraIfNeeded()
             environment.windowController.restoreAfterCapture()
             environment.permissionManager.markScreenRecordingCaptureAttempt()
             refreshPermissions()
@@ -452,11 +472,58 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    private func startPresenterCameraIfAllowed() async -> PresenterRecordingSession? {
+        guard includePresenterCamera, !presenterCameraRecordingStarted, permissions.camera == .granted else { return nil }
+
+        do {
+            let session = try await environment.presenterCameraRecorder.start()
+            presenterCameraRecordingStarted = true
+            return session
+        } catch {
+            presenterCameraRecordingStarted = false
+            return nil
+        }
+    }
+
+    private func updatePresenterCameraOffsetIfNeeded(sourceStartedAt: Date, presenterStartedAt: Date?) {
+        guard includePresenterCamera, let presenterStartedAt else { return }
+        environment.presenterCameraRecorder.updateRenderOffset(sourceStartedAt.timeIntervalSince(presenterStartedAt))
+    }
+
+    static func defaultPresenterBubbleStyle(isEnabled: Bool) -> PresenterBubbleStyle {
+        PresenterBubbleStyle(
+            isEnabled: isEnabled,
+            position: .bottomRight,
+            normalizedSize: PresenterBubbleStyle.defaultValue.normalizedSize,
+            shape: PresenterBubbleStyle.defaultValue.shape,
+            cornerRadius: PresenterBubbleStyle.defaultValue.cornerRadius,
+            shadowOpacity: PresenterBubbleStyle.defaultValue.shadowOpacity
+        )
+    }
+
+    private func stopPresenterCameraIfNeeded() async -> PresenterMedia? {
+        guard presenterCameraRecordingStarted else { return nil }
+        presenterCameraRecordingStarted = false
+
+        do {
+            return try await environment.presenterCameraRecorder.stop()
+        } catch {
+            return nil
+        }
+    }
+
+    private func cancelPresenterCameraIfNeeded() {
+        guard presenterCameraRecordingStarted else { return }
+        presenterCameraRecordingStarted = false
+        environment.presenterCameraRecorder.cancel()
+    }
+
     private func applyPreferences() {
         isApplyingDefaults = true
         selectedCaptureTarget = environment.preferencesStore.defaultCaptureTarget
         includeMicrophone = environment.preferencesStore.defaultMicrophoneEnabled
         includeSystemAudio = environment.preferencesStore.defaultSystemAudioEnabled
+        includePresenterCamera = environment.preferencesStore.defaultPresenterCameraEnabled
         selectedAspectRatio = environment.preferencesStore.defaultAspectRatio
         isApplyingDefaults = false
     }
@@ -479,6 +546,14 @@ final class HomeViewModel: ObservableObject {
             .store(in: &cancellables)
 
         environment.preferencesStore.$defaultSystemAudioEnabled
+            .dropFirst()
+            .sink { [weak self] (_: Bool) in
+                guard let self, self.recordingState == .idle else { return }
+                self.applyPreferences()
+            }
+            .store(in: &cancellables)
+
+        environment.preferencesStore.$defaultPresenterCameraEnabled
             .dropFirst()
             .sink { [weak self] (_: Bool) in
                 guard let self, self.recordingState == .idle else { return }

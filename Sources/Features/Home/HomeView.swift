@@ -19,7 +19,8 @@ struct HomeView: View {
         .sheet(isPresented: $viewModel.showingPermissions) {
             PermissionGateView(
                 viewModel: PermissionsViewModel(permissionManager: viewModel.permissionManager),
-                requiresMicrophone: viewModel.includeMicrophone
+                requiresMicrophone: viewModel.includeMicrophone,
+                requiresPresenterCamera: viewModel.includePresenterCamera
             ) {
                 Task { await viewModel.requestPermissions() }
             } onGranted: {
@@ -81,6 +82,15 @@ struct HomeView: View {
                 isOn: viewModel.includeSystemAudio
             ) {
                 viewModel.includeSystemAudio.toggle()
+            }
+            .disabled(viewModel.recordingState != .idle)
+
+            ToolbarToggleButton(
+                title: "Presenter",
+                systemImage: viewModel.includePresenterCamera ? "video.fill" : "video.slash.fill",
+                isOn: viewModel.includePresenterCamera
+            ) {
+                viewModel.includePresenterCamera.toggle()
             }
             .disabled(viewModel.recordingState != .idle)
 
@@ -299,13 +309,19 @@ struct HomeView: View {
             return "arrow.clockwise.shield"
         }
 
-        return viewModel.permissions.recordingReady(requiresMicrophone: viewModel.includeMicrophone)
+        return viewModel.permissions.recordingReady(
+            requiresMicrophone: viewModel.includeMicrophone,
+            requiresPresenterCamera: viewModel.includePresenterCamera
+        )
             ? "checkmark.shield"
             : "exclamationmark.shield"
     }
 
     private var permissionIconColor: Color {
-        viewModel.permissions.recordingReady(requiresMicrophone: viewModel.includeMicrophone)
+        viewModel.permissions.recordingReady(
+            requiresMicrophone: viewModel.includeMicrophone,
+            requiresPresenterCamera: viewModel.includePresenterCamera
+        )
             ? AppTheme.mutedText
             : .orange
     }

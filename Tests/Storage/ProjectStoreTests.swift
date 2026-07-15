@@ -58,6 +58,174 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertTrue(savedProject.manualZoomSegments.isEmpty)
     }
 
+    func testCreateProjectPreservesPresenterMedia() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let captureDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: captureDirectory, withIntermediateDirectories: true)
+        let presenterURL = captureDirectory.appendingPathComponent("presenter.mov")
+        let presenterData = Data("mouselens-presenter-media".utf8)
+        try presenterData.write(to: presenterURL, options: .atomic)
+
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .screen, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: Date(timeIntervalSince1970: 100),
+            mediaStartedAt: Date(timeIntervalSince1970: 100.2),
+            endedAt: Date(timeIntervalSince1970: 104),
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+        let presenterMedia = PresenterMedia(
+            sourceVideoURL: presenterURL,
+            startedAt: Date(timeIntervalSince1970: 99.9),
+            renderOffset: -0.1,
+            naturalSize: CGSize(width: 1280, height: 720)
+        )
+
+        let project = try store.createProject(
+            from: session,
+            events: [PointerEvent(timestamp: 0, location: .center, type: .move)],
+            keyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            ),
+            presenterMedia: presenterMedia
+        )
+
+        let savedProject = try XCTUnwrap(try store.loadRecentProjects(limit: 5).first)
+        let projectPresenterURL = try XCTUnwrap(project.presenterMedia?.sourceVideoURL)
+        XCTAssertTrue(projectPresenterURL.path.contains(project.id.uuidString))
+        XCTAssertEqual(projectPresenterURL.lastPathComponent, "presenter.mov")
+        XCTAssertEqual(projectPresenterURL, savedProject.presenterMedia?.sourceVideoURL)
+        XCTAssertEqual(try Data(contentsOf: projectPresenterURL), presenterData)
+        XCTAssertEqual(project.presenterMedia?.startedAt, presenterMedia.startedAt)
+        XCTAssertEqual(project.presenterMedia?.renderOffset, presenterMedia.renderOffset)
+        XCTAssertEqual(project.presenterMedia?.naturalSize, presenterMedia.naturalSize)
+    }
+
+    func testProjectStylePersistsPresenterBubbleStyle() throws {
+        let style = ProjectStyle(
+            aspectRatio: .landscape,
+            backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+            cornerRadius: 10.35,
+            shadowRadius: 24,
+            followStrength: 0.72,
+            clickEmphasis: 0.54,
+            padding: 0.04,
+            presenterBubbleStyle: PresenterBubbleStyle(
+                isEnabled: true,
+                position: .bottomRight,
+                normalizedSize: 0.22,
+                shape: .circle,
+                cornerRadius: 18,
+                shadowOpacity: 0.24
+            )
+        )
+
+        let encoded = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(ProjectStyle.self, from: encoded)
+
+        XCTAssertEqual(decoded.presenterBubbleStyle, style.presenterBubbleStyle)
+    }
+
+    func testLegacyProjectStyleWithoutPresenterBubbleStyleUsesDefault() throws {
+        let style = ProjectStyle(
+            aspectRatio: .landscape,
+            backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+            cornerRadius: 10.35,
+            shadowRadius: 24,
+            followStrength: 0.72,
+            clickEmphasis: 0.54,
+            padding: 0.04
+        )
+
+        let encoded = try JSONEncoder().encode(style)
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "presenterBubbleStyle")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject, options: [.prettyPrinted, .sortedKeys])
+        let decoded = try JSONDecoder().decode(ProjectStyle.self, from: legacyData)
+
+        XCTAssertEqual(decoded.presenterBubbleStyle, .defaultValue)
+    }
+
+    func testRecordingProjectPersistsPresenterMedia() throws {
+        let media = PresenterMedia(
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/presenter.mov"),
+            startedAt: Date(timeIntervalSince1970: 10),
+            renderOffset: 0.12,
+            naturalSize: CGSize(width: 1280, height: 720)
+        )
+
+        let project = RecordingProject(
+            id: UUID(),
+            name: "Demo",
+            createdAt: Date(timeIntervalSince1970: 20),
+            duration: 6,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov"),
+            captureTarget: .screen,
+            reconstructsCursor: true,
+            events: [],
+            cameraKeyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+                cornerRadius: 10.35,
+                shadowRadius: 24,
+                followStrength: 0.72,
+                clickEmphasis: 0.54,
+                padding: 0.04
+            ),
+            presenterMedia: media
+        )
+
+        let encoded = try JSONEncoder().encode(project)
+        let decoded = try JSONDecoder().decode(RecordingProject.self, from: encoded)
+
+        XCTAssertEqual(decoded.presenterMedia, media)
+    }
+
+    func testLegacyRecordingProjectWithoutPresenterMediaDefaultsToNil() throws {
+        let project = RecordingProject(
+            id: UUID(),
+            name: "LegacyNoPresenterMedia",
+            createdAt: Date(timeIntervalSince1970: 20),
+            duration: 6,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov"),
+            events: [],
+            cameraKeyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+                cornerRadius: 10.35,
+                shadowRadius: 24,
+                followStrength: 0.72,
+                clickEmphasis: 0.54,
+                padding: 0.04
+            )
+        )
+
+        let encoded = try JSONEncoder().encode(project)
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "presenterMedia")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject, options: [.prettyPrinted, .sortedKeys])
+        let decoded = try JSONDecoder().decode(RecordingProject.self, from: legacyData)
+
+        XCTAssertNil(decoded.presenterMedia)
+    }
+
     func testCreateProjectWritesCoordinateDiagnostics() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ProjectStore(rootDirectoryURL: directory)

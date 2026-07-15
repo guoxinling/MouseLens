@@ -21,15 +21,23 @@ struct AppPermissions: Equatable {
     let screenRecording: PermissionStatus
     let microphone: PermissionStatus
     let accessibility: PermissionStatus
+    let camera: PermissionStatus
 
     static let unknown = AppPermissions(
         screenRecording: .unknown,
         microphone: .unknown,
-        accessibility: .unknown
+        accessibility: .unknown,
+        camera: .unknown
     )
 
     func recordingReady(requiresMicrophone: Bool) -> Bool {
-        screenRecording == .granted && (!requiresMicrophone || microphone == .granted)
+        recordingReady(requiresMicrophone: requiresMicrophone, requiresPresenterCamera: false)
+    }
+
+    func recordingReady(requiresMicrophone: Bool, requiresPresenterCamera: Bool) -> Bool {
+        screenRecording == .granted
+            && (!requiresMicrophone || microphone == .granted)
+            && (!requiresPresenterCamera || camera == .granted)
     }
 
     var needsScreenRecordingRelaunch: Bool {
@@ -46,11 +54,16 @@ final class PermissionManager {
         AppPermissions(
             screenRecording: screenRecordingStatus(),
             microphone: microphoneStatus(),
-            accessibility: AXIsProcessTrusted() ? .granted : .unknown
+            accessibility: AXIsProcessTrusted() ? .granted : .unknown,
+            camera: cameraStatus()
         )
     }
 
-    func requestMissingPermissions(includeMicrophone: Bool, includeAccessibility: Bool) async {
+    func requestMissingPermissions(
+        includeMicrophone: Bool,
+        includeAccessibility: Bool,
+        includeCamera: Bool = false
+    ) async {
         if !CGPreflightScreenCaptureAccess() {
             screenRecordingPromptedThisLaunch = true
             _ = CGRequestScreenCaptureAccess()
@@ -60,10 +73,23 @@ final class PermissionManager {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
         }
 
+        if includeCamera && AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        }
+
         if includeAccessibility && !AXIsProcessTrusted() {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
         }
+    }
+
+    func requestCameraAccessIfNeeded() async {
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined else { return }
+        _ = await AVCaptureDevice.requestAccess(for: .video)
+    }
+
+    func cameraPermissionGranted() -> Bool {
+        cameraStatus() == .granted
     }
 
     func markScreenRecordingCaptureAttempt() {
@@ -87,6 +113,19 @@ final class PermissionManager {
 
     private func microphoneStatus() -> PermissionStatus {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            .granted
+        case .denied, .restricted:
+            .denied
+        case .notDetermined:
+            .unknown
+        @unknown default:
+            .unknown
+        }
+    }
+
+    private func cameraStatus() -> PermissionStatus {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             .granted
         case .denied, .restricted:

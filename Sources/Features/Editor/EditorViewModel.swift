@@ -51,6 +51,10 @@ final class EditorViewModel: ObservableObject {
     @Published private(set) var selectedManualZoomSegmentID: UUID?
     @Published private(set) var isEditingManualZoom = false
     @Published private(set) var isAdjustingManualZoomArea = false
+    @Published private(set) var isPresenterBubbleEnabled = PresenterBubbleStyle.defaultValue.isEnabled
+    @Published private(set) var presenterBubblePosition = PresenterBubbleStyle.defaultValue.position
+    @Published private(set) var presenterBubbleSize = PresenterBubbleStyle.defaultValue.normalizedSize
+    @Published private(set) var presenterBubbleShape = PresenterBubbleStyle.defaultValue.shape
 
     private let exportCoordinator: ExportCoordinator
     private let previewRenderer: any ProjectPreviewRendering
@@ -125,6 +129,7 @@ final class EditorViewModel: ObservableObject {
         isEditingTimelineTrim = false
         isEditingManualZoom = false
         isAdjustingManualZoomArea = false
+        syncPresenterBubbleState(with: project.style.presenterBubbleStyle)
         needsPreviewVideoAfterTrimEdit = false
         needsPreviewVideoAfterManualZoomEdit = false
         syncClipState(with: project.effectiveClipSegments, selectedIndex: 0)
@@ -270,8 +275,64 @@ final class EditorViewModel: ObservableObject {
         exportConfiguration.format.isAvailable
     }
 
+    var canEditPresenterBubble: Bool {
+        project?.presenterMedia != nil
+    }
+
     var exportUnavailableMessage: String? {
         nil
+    }
+
+    func updatePresenterBubbleEnabled(_ isEnabled: Bool) {
+        updatePresenterBubbleStyle { style in
+            PresenterBubbleStyle(
+                isEnabled: isEnabled,
+                position: style.position,
+                normalizedSize: style.normalizedSize,
+                shape: style.shape,
+                cornerRadius: style.cornerRadius,
+                shadowOpacity: style.shadowOpacity
+            )
+        }
+    }
+
+    func updatePresenterBubblePosition(_ position: PresenterBubblePosition) {
+        updatePresenterBubbleStyle { style in
+            PresenterBubbleStyle(
+                isEnabled: style.isEnabled,
+                position: position,
+                normalizedSize: style.normalizedSize,
+                shape: style.shape,
+                cornerRadius: style.cornerRadius,
+                shadowOpacity: style.shadowOpacity
+            )
+        }
+    }
+
+    func updatePresenterBubbleSize(_ size: Double) {
+        updatePresenterBubbleStyle { style in
+            PresenterBubbleStyle(
+                isEnabled: style.isEnabled,
+                position: style.position,
+                normalizedSize: size.clamped(to: 0.12...0.4),
+                shape: style.shape,
+                cornerRadius: style.cornerRadius,
+                shadowOpacity: style.shadowOpacity
+            )
+        }
+    }
+
+    func updatePresenterBubbleShape(_ shape: PresenterBubbleShape) {
+        updatePresenterBubbleStyle { style in
+            PresenterBubbleStyle(
+                isEnabled: style.isEnabled,
+                position: style.position,
+                normalizedSize: style.normalizedSize,
+                shape: shape,
+                cornerRadius: style.cornerRadius,
+                shadowOpacity: style.shadowOpacity
+            )
+        }
     }
 
     func updateExportFormat(_ format: ExportFormat) {
@@ -727,7 +788,8 @@ final class EditorViewModel: ObservableObject {
             shadowRadius: 0,
             followStrength: motionSettings.followStrength,
             clickEmphasis: motionSettings.clickEmphasis,
-            padding: padding
+            padding: padding,
+            presenterBubbleStyle: currentProject.style.presenterBubbleStyle
         )
 
         let keyframes = cameraPlanEngine.makePlan(
@@ -1049,6 +1111,35 @@ final class EditorViewModel: ObservableObject {
         }
     }
 
+    private func updatePresenterBubbleStyle(_ transform: (PresenterBubbleStyle) -> PresenterBubbleStyle) {
+        guard !isApplyingConfiguration, canEditPresenterBubble, let workingProject = project ?? sourceProject else { return }
+
+        let updatedStyle = transform(workingProject.style.presenterBubbleStyle)
+        let projectStyle = ProjectStyle(
+            aspectRatio: workingProject.style.aspectRatio,
+            backgroundPresetID: workingProject.style.backgroundPresetID,
+            cornerRadius: workingProject.style.cornerRadius,
+            shadowRadius: workingProject.style.shadowRadius,
+            followStrength: workingProject.style.followStrength,
+            clickEmphasis: workingProject.style.clickEmphasis,
+            padding: workingProject.style.padding,
+            presenterBubbleStyle: updatedStyle
+        )
+        let updatedProject = workingProject.updating(
+            style: projectStyle,
+            cameraKeyframes: workingProject.cameraKeyframes,
+            trimRange: currentTrimRange,
+            clipSegments: currentClipSegments
+        )
+
+        project = updatedProject
+        exportState = .idle
+        syncPresenterBubbleState(with: updatedStyle)
+        scheduleSave(for: updatedProject)
+        schedulePreview(for: updatedProject, debounceNanoseconds: 45_000_000)
+        prefersStaticPreview = updatedProject.sourceVideoURL != nil
+    }
+
     private func defaultManualZoomFocus(at timestamp: TimeInterval, in project: RecordingProject) -> NormalizedPoint {
         let sorted = project.events.sorted { $0.timestamp < $1.timestamp }
         guard let first = sorted.first else { return .center }
@@ -1125,6 +1216,15 @@ final class EditorViewModel: ObservableObject {
         if selectedManualZoomSegmentID == nil {
             isAdjustingManualZoomArea = false
         }
+        isApplyingConfiguration = false
+    }
+
+    private func syncPresenterBubbleState(with style: PresenterBubbleStyle) {
+        isApplyingConfiguration = true
+        isPresenterBubbleEnabled = style.isEnabled
+        presenterBubblePosition = style.position
+        presenterBubbleSize = style.normalizedSize
+        presenterBubbleShape = style.shape
         isApplyingConfiguration = false
     }
 

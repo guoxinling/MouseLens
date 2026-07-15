@@ -13,6 +13,7 @@ final class AppPreferencesStoreTests: XCTestCase {
         firstStore.hideWindowBeforeCapture = false
         firstStore.defaultMicrophoneEnabled = false
         firstStore.defaultSystemAudioEnabled = true
+        firstStore.defaultPresenterCameraEnabled = true
         firstStore.defaultCaptureTarget = .window
         firstStore.defaultAspectRatio = .portrait
         firstStore.autoRevealExportInFinder = true
@@ -22,6 +23,7 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(secondStore.hideWindowBeforeCapture)
         XCTAssertFalse(secondStore.defaultMicrophoneEnabled)
         XCTAssertTrue(secondStore.defaultSystemAudioEnabled)
+        XCTAssertTrue(secondStore.defaultPresenterCameraEnabled)
         XCTAssertEqual(secondStore.defaultCaptureTarget, .window)
         XCTAssertEqual(secondStore.defaultAspectRatio, .portrait)
         XCTAssertTrue(secondStore.autoRevealExportInFinder)

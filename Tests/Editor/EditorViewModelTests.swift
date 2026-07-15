@@ -310,6 +310,46 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedBackgroundPresetID, "horizon-glow")
     }
 
+    func testConfiguringEditorLoadsPresenterBubbleState() {
+        let project = makeProjectWithPresenterBubble()
+        let viewModel = makeViewModel()
+
+        viewModel.configure(for: project)
+
+        XCTAssertTrue(viewModel.canEditPresenterBubble)
+        XCTAssertTrue(viewModel.isPresenterBubbleEnabled)
+        XCTAssertEqual(viewModel.presenterBubblePosition, .bottomRight)
+        XCTAssertEqual(viewModel.presenterBubbleSize, 0.26, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.presenterBubbleShape, .roundedRect)
+    }
+
+    func testConfiguringEditorWithoutPresenterMediaHidesPresenterControls() {
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+        let viewModel = makeViewModel()
+
+        viewModel.configure(for: project)
+
+        XCTAssertFalse(viewModel.canEditPresenterBubble)
+    }
+
+    func testUpdatingPresenterBubbleRebuildsDraftProject() {
+        let project = makeProjectWithPresenterBubble()
+        let viewModel = makeViewModel()
+        viewModel.configure(for: project)
+
+        viewModel.updatePresenterBubblePosition(.topLeft)
+        viewModel.updatePresenterBubbleSize(0.31)
+        viewModel.updatePresenterBubbleShape(.circle)
+        viewModel.updatePresenterBubbleEnabled(false)
+
+        let style = viewModel.project?.style.presenterBubbleStyle
+        XCTAssertEqual(style?.position, .topLeft)
+        XCTAssertEqual(style?.normalizedSize ?? -1, 0.31, accuracy: 0.0001)
+        XCTAssertEqual(style?.shape, .circle)
+        XCTAssertEqual(style?.isEnabled, false)
+        XCTAssertEqual(viewModel.project?.presenterMedia, project.presenterMedia)
+    }
+
     func testPreviewTimestampClampsToProjectDuration() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
@@ -996,6 +1036,37 @@ final class EditorViewModelTests: XCTestCase {
             ),
             manualZoomSegments: manualZoomSegments,
             zoomTrackEdited: zoomTrackEdited
+        )
+    }
+
+    private func makeProjectWithPresenterBubble() -> RecordingProject {
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            position: .bottomRight,
+            normalizedSize: 0.26,
+            shape: .roundedRect,
+            cornerRadius: 22,
+            shadowOpacity: 0.32
+        )
+        let baseProject = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+        return baseProject.updating(
+            style: ProjectStyle(
+                aspectRatio: baseProject.style.aspectRatio,
+                backgroundPresetID: baseProject.style.backgroundPresetID,
+                cornerRadius: baseProject.style.cornerRadius,
+                shadowRadius: baseProject.style.shadowRadius,
+                followStrength: baseProject.style.followStrength,
+                clickEmphasis: baseProject.style.clickEmphasis,
+                padding: baseProject.style.padding,
+                presenterBubbleStyle: style
+            ),
+            cameraKeyframes: baseProject.cameraKeyframes,
+            presenterMedia: PresenterMedia(
+                sourceVideoURL: URL(fileURLWithPath: "/tmp/presenter.mov"),
+                startedAt: Date(timeIntervalSince1970: 10),
+                renderOffset: 0,
+                naturalSize: CGSize(width: 1280, height: 720)
+            )
         )
     }
 }

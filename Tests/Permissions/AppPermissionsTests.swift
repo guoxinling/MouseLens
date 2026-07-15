@@ -6,18 +6,22 @@ final class AppPermissionsTests: XCTestCase {
         let permissions = AppPermissions(
             screenRecording: .granted,
             microphone: .unknown,
-            accessibility: .unknown
+            accessibility: .unknown,
+            camera: .denied
         )
 
         XCTAssertTrue(permissions.recordingReady(requiresMicrophone: false))
         XCTAssertFalse(permissions.recordingReady(requiresMicrophone: true))
+        XCTAssertTrue(permissions.recordingReady(requiresMicrophone: false, requiresPresenterCamera: false))
+        XCTAssertFalse(permissions.recordingReady(requiresMicrophone: false, requiresPresenterCamera: true))
     }
 
     func testNeedsScreenRecordingRelaunchTracksTransientState() {
         let permissions = AppPermissions(
             screenRecording: .requiresRelaunch,
             microphone: .granted,
-            accessibility: .unknown
+            accessibility: .unknown,
+            camera: .granted
         )
 
         XCTAssertTrue(permissions.needsScreenRecordingRelaunch)

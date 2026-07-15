@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C600B02748D9ED6E654808 /* PermissionGateView.swift */; };
 		097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */; };
+		0A9E20E49BB54A0988720760 /* PresenterCameraRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A9E20E29BB54A0988720760 /* PresenterCameraRecorder.swift */; };
+		0A9E20E59BB54A0988720760 /* PresenterCameraRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A9E20E39BB54A0988720760 /* PresenterCameraRecorderTests.swift */; };
+		0B4D729E4EAD8F8C01D1E6A1 /* PresenterOverlayGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B4D729D4EAD8F8C01D1E6A1 /* PresenterOverlayGeometry.swift */; };
+		0B4D72A04EAD8F8C01D1E6A1 /* PresenterOverlayGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B4D729F4EAD8F8C01D1E6A1 /* PresenterOverlayGeometryTests.swift */; };
 		0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B3C83372DF0ABDCDC2E925 /* AppPreferences.swift */; };
 		118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92E933D7DB3407EA9D77750 /* ProjectModels.swift */; };
 		175F7434233F0509C9554848 /* RecordingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81318E147711A2C2F2CE4B4F /* RecordingState.swift */; };
@@ -67,6 +71,10 @@
 /* Begin PBXFileReference section */
 		035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanEngineTests.swift; sourceTree = "<group>"; };
 		04ACE584B09B8D0461A21567 /* ExportPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportPanelView.swift; sourceTree = "<group>"; };
+		0A9E20E29BB54A0988720760 /* PresenterCameraRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenterCameraRecorder.swift; sourceTree = "<group>"; };
+		0A9E20E39BB54A0988720760 /* PresenterCameraRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenterCameraRecorderTests.swift; sourceTree = "<group>"; };
+		0B4D729D4EAD8F8C01D1E6A1 /* PresenterOverlayGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenterOverlayGeometry.swift; sourceTree = "<group>"; };
+		0B4D729F4EAD8F8C01D1E6A1 /* PresenterOverlayGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenterOverlayGeometryTests.swift; sourceTree = "<group>"; };
 		10D9FFAFE17E315029467454 /* MouseLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseLensApp.swift; sourceTree = "<group>"; };
 		1182832D4DFB818974F0A533 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModel.swift; sourceTree = "<group>"; };
 		17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportConfigurationTests.swift; sourceTree = "<group>"; };
@@ -325,6 +333,7 @@
 		B461677CECF344DAF0FE7FAA /* Render */ = {
 			isa = PBXGroup;
 			children = (
+				0B4D729D4EAD8F8C01D1E6A1 /* PresenterOverlayGeometry.swift */,
 				9292717184450E66935639A4 /* RenderModels.swift */,
 			);
 			path = Render;
@@ -382,6 +391,7 @@
 				21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */,
 				B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */,
 				2F8AF9BF1931E94399BCFE78 /* GIFEncodingTests.swift */,
+				0B4D729F4EAD8F8C01D1E6A1 /* PresenterOverlayGeometryTests.swift */,
 				5967174E64E0E059D2C1082F /* SourceCropPlannerTests.swift */,
 			);
 			path = Render;
@@ -391,6 +401,7 @@
 			isa = PBXGroup;
 			children = (
 				7E576C3297B592252A5FC156 /* CaptureSizePolicyTests.swift */,
+				0A9E20E39BB54A0988720760 /* PresenterCameraRecorderTests.swift */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -412,6 +423,7 @@
 			children = (
 				2C8C68EB4E6D682FA2E0613E /* CaptureModels.swift */,
 				199ACA29EC75C5E19768EBE0 /* ObjCExceptionCatcher.m */,
+				0A9E20E29BB54A0988720760 /* PresenterCameraRecorder.swift */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -522,6 +534,8 @@
 				374D050556033AAF573F9EB4 /* GIFEncodingTests.swift in Sources */,
 				88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */,
 				99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */,
+				0A9E20E59BB54A0988720760 /* PresenterCameraRecorderTests.swift in Sources */,
+				0B4D72A04EAD8F8C01D1E6A1 /* PresenterOverlayGeometryTests.swift in Sources */,
 				FD85B10F280D226F2D06FE75 /* SourceCropPlannerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -551,6 +565,8 @@
 				57319A8900167E59078AF4C8 /* ObjCExceptionCatcher.m in Sources */,
 				01178BD4688E908670ADE267 /* PermissionGateView.swift in Sources */,
 				CC707C7A3A73BA7D2DFB5835 /* PermissionsViewModel.swift in Sources */,
+				0A9E20E49BB54A0988720760 /* PresenterCameraRecorder.swift in Sources */,
+				0B4D729E4EAD8F8C01D1E6A1 /* PresenterOverlayGeometry.swift in Sources */,
 				644B6B00A9321C433514ADB9 /* PreviewCanvasView.swift in Sources */,
 				118E6BD18282B88D53E22399 /* ProjectModels.swift in Sources */,
 				26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */,
@@ -604,6 +620,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MouseLens;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses accessibility support to detect pointer activity for automatic camera moves.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "MouseLens can record your camera as an optional presenter bubble.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
 				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -628,6 +645,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MouseLens;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses accessibility support to detect pointer activity for automatic camera moves.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "MouseLens can record your camera as an optional presenter bubble.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
 				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -676,7 +694,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -742,7 +760,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

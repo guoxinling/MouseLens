@@ -26,6 +26,7 @@ struct SettingsView: View {
                     Toggle("Hide MouseLens before capture starts", isOn: $preferences.hideWindowBeforeCapture)
                     Toggle("Enable microphone by default", isOn: $preferences.defaultMicrophoneEnabled)
                     Toggle("Enable system audio by default", isOn: $preferences.defaultSystemAudioEnabled)
+                    Toggle("Enable presenter camera by default", isOn: $preferences.defaultPresenterCameraEnabled)
                 }
 
                 Section("Output") {

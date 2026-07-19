@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct RecordingHUDView: View {
@@ -146,57 +147,73 @@ struct RecordingHUDView: View {
 
 struct FloatingRecordingToolbarView: View {
     let session: RecordingSessionState
+    let presenterPreviewSession: AVCaptureSession?
     let onPauseResume: () -> Void
     let onStop: () -> Void
 
+    static func contentSize(hasPresenterPreview: Bool) -> CGSize {
+        hasPresenterPreview ? CGSize(width: 472, height: 96) : CGSize(width: 360, height: 58)
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(session.isPaused ? .orange : .red)
-                    .frame(width: 9, height: 9)
+        HStack(spacing: 14) {
+            if let presenterPreviewSession {
+                PresenterLivePreviewBubble(session: presenterPreviewSession)
+                    .frame(width: 72, height: 72)
+                    .padding(.leading, 12)
+            }
 
-                TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                    Text(elapsedText(now: context.date))
-                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, alignment: .leading)
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(session.isPaused ? .orange : .red)
+                        .frame(width: 9, height: 9)
+
+                    TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                        Text(elapsedText(now: context.date))
+                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .frame(width: 56, alignment: .leading)
+                    }
                 }
+                .padding(.leading, presenterPreviewSession == nil ? 14 : 0)
+
+                Divider()
+                    .frame(height: 24)
+                    .overlay(Color.white.opacity(0.22))
+
+                Button(action: onPauseResume) {
+                    Image(systemName: session.isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 34)
+                }
+                .buttonStyle(.plain)
+                .help(session.isPaused ? "Resume recording" : "Pause recording")
+
+                Button(role: .destructive, action: onStop) {
+                    Label("Finish", systemImage: "stop.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.red.opacity(0.88))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Finish recording")
+
+                Spacer(minLength: 0)
             }
-            .padding(.leading, 14)
-
-            Divider()
-                .frame(height: 24)
-                .overlay(Color.white.opacity(0.22))
-
-            Button(action: onPauseResume) {
-                Image(systemName: session.isPaused ? "play.fill" : "pause.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 34)
-            }
-            .buttonStyle(.plain)
-            .help(session.isPaused ? "Resume recording" : "Pause recording")
-
-            Button(role: .destructive, action: onStop) {
-                Label("Finish", systemImage: "stop.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .frame(height: 34)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.red.opacity(0.88))
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("Finish recording")
-
-            Spacer(minLength: 0)
         }
-        .frame(width: 360, height: 58)
+        .frame(
+            width: Self.contentSize(hasPresenterPreview: presenterPreviewSession != nil).width,
+            height: Self.contentSize(hasPresenterPreview: presenterPreviewSession != nil).height
+        )
         .background(.ultraThinMaterial)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -210,6 +227,100 @@ struct FloatingRecordingToolbarView: View {
         let minutes = duration / 60
         let seconds = duration % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+}
+
+private struct PresenterLivePreviewBubble: View {
+    let session: AVCaptureSession
+
+    var body: some View {
+        PresenterCameraPreviewView(session: session)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 6)
+            .accessibilityLabel("Presenter camera preview")
+    }
+}
+
+struct PresenterPreflightBubbleView: View {
+    let session: AVCaptureSession
+    let style: PresenterBubbleStyle
+
+    var body: some View {
+        GeometryReader { geometry in
+            PresenterCameraPreviewView(session: session)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: geometry.size.width * CGFloat(style.cornerRadiusRatio),
+                        style: .continuous
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: geometry.size.width * CGFloat(style.cornerRadiusRatio),
+                        style: .continuous
+                    )
+                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 1)
+                )
+                .shadow(
+                    color: .black.opacity(style.shadowOpacity),
+                    radius: max(10, geometry.size.width * 0.08),
+                    x: 0,
+                    y: max(6, geometry.size.width * 0.04)
+                )
+        }
+        .accessibilityLabel("Presenter camera bubble")
+    }
+}
+
+struct PresenterCameraPreviewView: NSViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeNSView(context: Context) -> PresenterCameraPreviewNSView {
+        let view = PresenterCameraPreviewNSView()
+        view.update(session: session)
+        return view
+    }
+
+    func updateNSView(_ nsView: PresenterCameraPreviewNSView, context: Context) {
+        nsView.update(session: session)
+    }
+}
+
+final class PresenterCameraPreviewNSView: NSView {
+    private let previewLayer = AVCaptureVideoPreviewLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        previewLayer.videoGravity = .resizeAspectFill
+        layer = previewLayer
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        previewLayer.frame = bounds
+        applyMirroring()
+    }
+
+    func update(session: AVCaptureSession) {
+        if previewLayer.session !== session {
+            previewLayer.session = session
+        }
+        applyMirroring()
+    }
+
+    private func applyMirroring() {
+        guard let connection = previewLayer.connection, connection.isVideoMirroringSupported else { return }
+        connection.automaticallyAdjustsVideoMirroring = false
+        connection.isVideoMirrored = true
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 
@@ -35,8 +36,10 @@ final class HomeViewModel: ObservableObject {
     }
     @Published var includePresenterCamera = false {
         didSet {
-            guard !isApplyingDefaults else { return }
-            environment.preferencesStore.defaultPresenterCameraEnabled = includePresenterCamera
+            if !isApplyingDefaults {
+                environment.preferencesStore.defaultPresenterCameraEnabled = includePresenterCamera
+            }
+            Task { await configurePresenterCameraPreviewForCurrentToggle() }
         }
     }
     @Published var selectedAspectRatio: ProjectAspectRatio = .landscape {
@@ -50,6 +53,8 @@ final class HomeViewModel: ObservableObject {
     @Published var recordingState: RecordingState = .idle
     @Published var showingPermissions = false
     @Published var statusMessage = "Record a screen demo and let MouseLens build the camera motion."
+    @Published private(set) var presenterBubbleStyle = PresenterBubbleStyle.defaultValue
+    @Published private(set) var presenterCameraPreviewSession: AVCaptureSession?
     @Published var selectedWindowTargetID: UInt32?
     @Published private(set) var availableWindowTargets: [CaptureWindowOption] = []
     @Published private(set) var isRefreshingWindowTargets = false
@@ -62,6 +67,8 @@ final class HomeViewModel: ObservableObject {
     private var loadingWindowTargetRefreshGeneration: Int?
     private var isApplyingDefaults = false
     private var presenterCameraRecordingStarted = false
+    private var presenterCameraStartedAt: Date?
+    private var presenterCameraPreviewDeviceName = ""
     private var cancellables: Set<AnyCancellable> = []
 
     var permissionManager: PermissionManager {
@@ -223,7 +230,7 @@ final class HomeViewModel: ObservableObject {
                 followStrength: 0.72,
                 clickEmphasis: 0.54,
                 padding: 0.04,
-                presenterBubbleStyle: Self.defaultPresenterBubbleStyle(
+                presenterBubbleStyle: presenterBubbleStyleForProject(
                     isEnabled: presenterMedia?.sourceVideoURL != nil
                 )
             )
@@ -347,6 +354,7 @@ final class HomeViewModel: ObservableObject {
                 previousID: previousTargetID,
                 policy: policy
             )
+            showPresenterBubblePanelIfNeeded()
 
             if let selectedWindowTarget, showsLoadingState {
                 statusMessage = "Window target: \(selectedWindowTarget.displayLabel)."
@@ -373,10 +381,23 @@ final class HomeViewModel: ObservableObject {
 
     func captureToolbarDidAppear() {
         scheduleWindowTargetRefresh(delayNanoseconds: 0)
+        Task { await configurePresenterCameraPreviewForCurrentToggle() }
+    }
+
+    func updatePresenterBubbleCenter(_ center: NormalizedPoint) {
+        presenterBubbleStyle = PresenterBubbleStyle(
+            isEnabled: presenterBubbleStyle.isEnabled,
+            normalizedCenter: center,
+            normalizedSize: presenterBubbleStyle.normalizedSize,
+            cornerRadiusRatio: presenterBubbleStyle.cornerRadiusRatio,
+            shadowOpacity: presenterBubbleStyle.shadowOpacity,
+            source: presenterBubbleStyle.source
+        )
     }
 
     func selectWindowTarget(_ target: CaptureWindowOption) {
         selectedWindowTargetID = target.id
+        showPresenterBubblePanelIfNeeded()
         statusMessage = "Window target: \(target.displayLabel)."
     }
 
@@ -473,14 +494,30 @@ final class HomeViewModel: ObservableObject {
     }
 
     private func startPresenterCameraIfAllowed() async -> PresenterRecordingSession? {
-        guard includePresenterCamera, !presenterCameraRecordingStarted, permissions.camera == .granted else { return nil }
+        guard includePresenterCamera, permissions.camera == .granted else { return nil }
+        if presenterCameraRecordingStarted {
+            showPresenterBubblePanelIfNeeded()
+            guard let presenterCameraStartedAt else { return nil }
+            return PresenterRecordingSession(
+                startedAt: presenterCameraStartedAt,
+                previewDeviceName: presenterCameraPreviewDeviceName
+            )
+        }
 
         do {
             let session = try await environment.presenterCameraRecorder.start()
             presenterCameraRecordingStarted = true
+            presenterCameraStartedAt = session.startedAt
+            presenterCameraPreviewDeviceName = session.previewDeviceName
+            presenterCameraPreviewSession = environment.presenterCameraRecorder.activePreviewSession
+            showPresenterBubblePanelIfNeeded()
             return session
         } catch {
             presenterCameraRecordingStarted = false
+            presenterCameraStartedAt = nil
+            presenterCameraPreviewDeviceName = ""
+            presenterCameraPreviewSession = nil
+            environment.windowController.hidePresenterBubblePanel()
             return nil
         }
     }
@@ -493,21 +530,39 @@ final class HomeViewModel: ObservableObject {
     static func defaultPresenterBubbleStyle(isEnabled: Bool) -> PresenterBubbleStyle {
         PresenterBubbleStyle(
             isEnabled: isEnabled,
-            position: .bottomRight,
+            normalizedCenter: PresenterBubbleStyle.defaultValue.normalizedCenter,
             normalizedSize: PresenterBubbleStyle.defaultValue.normalizedSize,
-            shape: PresenterBubbleStyle.defaultValue.shape,
-            cornerRadius: PresenterBubbleStyle.defaultValue.cornerRadius,
-            shadowOpacity: PresenterBubbleStyle.defaultValue.shadowOpacity
+            cornerRadiusRatio: PresenterBubbleStyle.defaultValue.cornerRadiusRatio,
+            shadowOpacity: PresenterBubbleStyle.defaultValue.shadowOpacity,
+            source: .camera
+        )
+    }
+
+    private func presenterBubbleStyleForProject(isEnabled: Bool) -> PresenterBubbleStyle {
+        PresenterBubbleStyle(
+            isEnabled: isEnabled,
+            normalizedCenter: presenterBubbleStyle.normalizedCenter,
+            normalizedSize: presenterBubbleStyle.normalizedSize,
+            cornerRadiusRatio: presenterBubbleStyle.cornerRadiusRatio,
+            shadowOpacity: presenterBubbleStyle.shadowOpacity,
+            source: presenterBubbleStyle.source
         )
     }
 
     private func stopPresenterCameraIfNeeded() async -> PresenterMedia? {
         guard presenterCameraRecordingStarted else { return nil }
         presenterCameraRecordingStarted = false
+        presenterCameraStartedAt = nil
+        presenterCameraPreviewDeviceName = ""
 
         do {
-            return try await environment.presenterCameraRecorder.stop()
+            let media = try await environment.presenterCameraRecorder.stop()
+            presenterCameraPreviewSession = nil
+            environment.windowController.hidePresenterBubblePanel()
+            return media
         } catch {
+            presenterCameraPreviewSession = nil
+            environment.windowController.hidePresenterBubblePanel()
             return nil
         }
     }
@@ -515,7 +570,69 @@ final class HomeViewModel: ObservableObject {
     private func cancelPresenterCameraIfNeeded() {
         guard presenterCameraRecordingStarted else { return }
         presenterCameraRecordingStarted = false
+        presenterCameraStartedAt = nil
+        presenterCameraPreviewDeviceName = ""
         environment.presenterCameraRecorder.cancel()
+        presenterCameraPreviewSession = nil
+        environment.windowController.hidePresenterBubblePanel()
+    }
+
+    private func configurePresenterCameraPreviewForCurrentToggle() async {
+        refreshPermissions()
+        guard includePresenterCamera else {
+            cancelPresenterCameraIfNeeded()
+            environment.windowController.hidePresenterBubblePanel()
+            presenterBubbleStyle = Self.defaultPresenterBubbleStyle(isEnabled: false)
+            return
+        }
+
+        if permissions.camera == .unknown {
+            await environment.permissionManager.requestCameraAccessIfNeeded()
+            refreshPermissions()
+        }
+
+        guard permissions.camera == .granted else {
+            presenterBubbleStyle = Self.defaultPresenterBubbleStyle(isEnabled: false)
+            environment.windowController.hidePresenterBubblePanel()
+            return
+        }
+
+        presenterBubbleStyle = PresenterBubbleStyle(
+            isEnabled: true,
+            normalizedCenter: presenterBubbleStyle.normalizedCenter,
+            normalizedSize: presenterBubbleStyle.normalizedSize,
+            cornerRadiusRatio: presenterBubbleStyle.cornerRadiusRatio,
+            shadowOpacity: presenterBubbleStyle.shadowOpacity,
+            source: presenterBubbleStyle.source
+        )
+        _ = await startPresenterCameraIfAllowed()
+    }
+
+    private func showPresenterBubblePanelIfNeeded() {
+        guard includePresenterCamera, presenterBubbleStyle.isEnabled, let presenterCameraPreviewSession else {
+            environment.windowController.hidePresenterBubblePanel()
+            return
+        }
+
+        let style = presenterBubbleStyle
+        environment.windowController.showPresenterBubblePanel(
+            style: style,
+            trackingFrame: presenterBubbleTrackingFrame()
+        ) {
+            PresenterPreflightBubbleView(
+                session: presenterCameraPreviewSession,
+                style: style
+            )
+        } onMove: { [weak self] center in
+            self?.updatePresenterBubbleCenter(center)
+        }
+    }
+
+    private func presenterBubbleTrackingFrame() -> NSRect? {
+        // The presenter bubble is a composition overlay, not part of the captured
+        // screen/window layer. Keep preflight and recording placement in the same
+        // canvas coordinate space used by preview/export.
+        nil
     }
 
     private func applyPreferences() {

@@ -339,6 +339,7 @@ private struct RootView: View {
                 await Task.yield()
                 windowController.restoreAfterCapture(activate: false)
                 windowController.applyEditorWindowLayout()
+                windowController.maximizeEditorWindowOnActiveScreen()
                 windowController.activateAppWindow(forceAppActivation: true)
             }
         }
@@ -392,9 +393,11 @@ private struct RootView: View {
                 )
             }
         case .recording(let session):
-            windowController.showRecordingControlPanel {
+            let contentSize = FloatingRecordingToolbarView.contentSize(hasPresenterPreview: false)
+            windowController.showRecordingControlPanel(contentSize: contentSize) {
                 FloatingRecordingToolbarView(
                     session: session,
+                    presenterPreviewSession: nil,
                     onPauseResume: {
                         homeViewModel.toggleRecordingPause()
                     },

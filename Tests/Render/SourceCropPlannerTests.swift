@@ -126,7 +126,7 @@ final class SourceCropPlannerTests: XCTestCase {
         _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
 
         let frame = try Self.firstVideoFrame(from: outputURL)
-        let samplePoint = Self.presenterSamplePoint(style: style, renderSize: configuration.renderSize(for: .landscape))
+        let samplePoint = CGPoint(x: CGFloat(frame.width) / 2, y: CGFloat(frame.height) / 2)
         let pixel = try Self.pixel(in: frame, atTopOriginPoint: samplePoint)
         XCTAssertGreaterThan(pixel.blue, 0.72)
         XCTAssertLessThan(pixel.red, 0.28)
@@ -161,7 +161,7 @@ final class SourceCropPlannerTests: XCTestCase {
         ))
 
         XCTAssertEqual(plan.sourceVideoURL, presenterURL)
-        XCTAssertEqual(plan.layout, PresenterOverlayGeometry.layout(contentRect: layout.contentRect, style: style))
+        XCTAssertEqual(plan.layout, PresenterOverlayGeometry.layout(contentRect: layout.fullRect, style: style))
         XCTAssertEqual(plan.timestamp, 0, accuracy: 0.0001)
         XCTAssertEqual(plan.shadowOpacity, 0.31, accuracy: 0.0001)
     }
@@ -374,6 +374,14 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual(layout.outputAspectRatio, 16.0 / 9.0, accuracy: 0.0001)
     }
 
+    func testRenderLayoutAllowsZeroPaddingToFillOutputCanvas() {
+        let renderSize = CGSize(width: 1920, height: 1080)
+        let layout = RenderLayout(renderSize: renderSize, padding: 0)
+
+        XCTAssertEqual(layout.contentRect, CGRect(origin: .zero, size: renderSize))
+        XCTAssertEqual(layout.outputAspectRatio, 16.0 / 9.0, accuracy: 0.0001)
+    }
+
     func testRealtimePreviewGeometryMapsCursorIntoPaddedContentRect() {
         let contentRect = CGRect(x: 120, y: 80, width: 1440, height: 810)
         let geometry = RealtimePreviewGeometry(
@@ -452,6 +460,33 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual(presentation.displayRect.height, 900, accuracy: 0.0001)
         XCTAssertEqual(presentation.displayRect.midX, contentRect.midX, accuracy: 0.0001)
         XCTAssertEqual(presentation.displayRect.midY, contentRect.midY, accuracy: 0.0001)
+    }
+
+    func testWindowCaptureZeroPaddingFillsOutputCanvasInsteadOfLetterboxing() {
+        let renderLayout = RenderLayout(renderSize: CGSize(width: 1600, height: 900), padding: 0)
+        let shouldPreserveFullSource = SourcePresentationPolicy.preservesFullSourceAtBase(
+            captureTarget: .window,
+            padding: 0
+        )
+        let presentation = SourceCropPlanner().presentation(
+            for: CGRect(x: 0, y: 0, width: 2560, height: 1600),
+            contentRect: renderLayout.contentRect,
+            snapshot: FrameSnapshot(focus: .center, zoom: 1.0, emphasis: .none),
+            preservesFullSourceAtBase: shouldPreserveFullSource
+        )
+
+        XCTAssertFalse(shouldPreserveFullSource)
+        XCTAssertEqual(presentation.displayRect, renderLayout.contentRect)
+        XCTAssertEqual(presentation.cropRect.width / presentation.cropRect.height, 16.0 / 9.0, accuracy: 0.0001)
+    }
+
+    func testWindowCaptureNonZeroPaddingKeepsFullSourceInsideBackground() {
+        let shouldPreserveFullSource = SourcePresentationPolicy.preservesFullSourceAtBase(
+            captureTarget: .window,
+            padding: 0.04
+        )
+
+        XCTAssertTrue(shouldPreserveFullSource)
     }
 
     func testWindowBasePreviewFitsFullSourceWithoutCropping() {
@@ -708,8 +743,9 @@ final class SourceCropPlannerTests: XCTestCase {
     }
 
     private static func presenterSamplePoint(style: PresenterBubbleStyle, renderSize: CGSize) -> CGPoint {
+        let renderLayout = RenderLayout(renderSize: renderSize, padding: 0.08)
         let layout = PresenterOverlayGeometry.layout(
-            contentRect: RenderLayout(renderSize: renderSize, padding: 0.08).contentRect,
+            contentRect: renderLayout.fullRect,
             style: style
         )
         return CGPoint(x: layout.frame.midX, y: layout.frame.midY)

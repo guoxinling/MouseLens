@@ -97,4 +97,5 @@ final class WindowSelectionPriorityTests: XCTestCase {
 
         XCTAssertGreaterThan(topmost, background)
     }
+
 }

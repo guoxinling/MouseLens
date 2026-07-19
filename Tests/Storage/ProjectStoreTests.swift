@@ -110,6 +110,58 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(project.presenterMedia?.naturalSize, presenterMedia.naturalSize)
     }
 
+    func testCreateProjectDropsPresenterMediaWhenSourceFileIsMissing() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let missingPresenterURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mov")
+
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .screen, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: Date(timeIntervalSince1970: 100),
+            mediaStartedAt: Date(timeIntervalSince1970: 100.2),
+            endedAt: Date(timeIntervalSince1970: 104),
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+        let presenterMedia = PresenterMedia(
+            sourceVideoURL: missingPresenterURL,
+            startedAt: Date(timeIntervalSince1970: 99.9),
+            renderOffset: -0.1,
+            naturalSize: CGSize(width: 1280, height: 720)
+        )
+
+        let project = try store.createProject(
+            from: session,
+            events: [PointerEvent(timestamp: 0, location: .center, type: .move)],
+            keyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08,
+                presenterBubbleStyle: PresenterBubbleStyle(
+                    isEnabled: true,
+                    position: .bottomRight,
+                    normalizedSize: 0.22,
+                    shape: .circle,
+                    cornerRadius: 18,
+                    shadowOpacity: 0.24
+                )
+            ),
+            presenterMedia: presenterMedia
+        )
+
+        let savedProject = try XCTUnwrap(try store.loadRecentProjects(limit: 5).first)
+        XCTAssertNil(project.presenterMedia)
+        XCTAssertNil(savedProject.presenterMedia)
+    }
+
     func testProjectStylePersistsPresenterBubbleStyle() throws {
         let style = ProjectStyle(
             aspectRatio: .landscape,
@@ -133,6 +185,43 @@ final class ProjectStoreTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ProjectStyle.self, from: encoded)
 
         XCTAssertEqual(decoded.presenterBubbleStyle, style.presenterBubbleStyle)
+    }
+
+    func testPresenterBubbleStyleDecodesLegacyBottomRightCircleIntoFreePosition() throws {
+        let legacyJSON = """
+        {
+          "isEnabled": true,
+          "position": "bottomRight",
+          "normalizedSize": 0.22,
+          "shape": "circle",
+          "cornerRadius": 18,
+          "shadowOpacity": 0.24
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(PresenterBubbleStyle.self, from: legacyJSON)
+
+        XCTAssertEqual(decoded.normalizedCenter.x, 1, accuracy: 0.0001)
+        XCTAssertEqual(decoded.normalizedCenter.y, 1, accuracy: 0.0001)
+        XCTAssertEqual(decoded.cornerRadiusRatio, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(decoded.source, .camera)
+    }
+
+    func testPresenterBubbleStylePersistsReservedPresenterSource() throws {
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            normalizedCenter: NormalizedPoint(x: 0.38, y: 0.72),
+            normalizedSize: 0.24,
+            cornerRadiusRatio: 0.18,
+            shadowOpacity: 0.31,
+            source: .avatarImage
+        )
+
+        let encoded = try JSONEncoder().encode(style)
+        let decoded = try JSONDecoder().decode(PresenterBubbleStyle.self, from: encoded)
+
+        XCTAssertEqual(decoded, style)
+        XCTAssertEqual(decoded.source, .avatarImage)
     }
 
     func testLegacyProjectStyleWithoutPresenterBubbleStyleUsesDefault() throws {

@@ -27,6 +27,56 @@ struct PreviewPlaybackTimeline {
     }
 }
 
+struct PreviewPlaybackControlsPlacement {
+    static let footerHeight: CGFloat = 46
+
+    static func footerFrame(
+        below stageFrame: CGRect,
+        spacing: CGFloat = 0,
+        height: CGFloat = footerHeight
+    ) -> CGRect {
+        CGRect(
+            x: stageFrame.minX,
+            y: stageFrame.maxY + spacing,
+            width: stageFrame.width,
+            height: height
+        )
+    }
+}
+
+struct PreviewFooterMetadataPolicy {
+    static func showsMetadataRow(
+        hasPlayablePreview: Bool,
+        previewState: PreviewVideoState
+    ) -> Bool {
+        if hasPlayablePreview {
+            return false
+        }
+        return true
+    }
+
+    static func promotesRefreshAction(previewState: PreviewVideoState) -> Bool {
+        if case .failed = previewState {
+            return true
+        }
+        return false
+    }
+}
+
+struct PreviewKeyboardShortcutPolicy {
+    static let spaceKeyCode: UInt16 = 49
+
+    static func shouldTogglePlayback(
+        keyCode: UInt16,
+        charactersIgnoringModifiers: String?,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> Bool {
+        let activeModifiers = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard activeModifiers.isEmpty else { return false }
+        return keyCode == spaceKeyCode || charactersIgnoringModifiers == " "
+    }
+}
+
 struct PreviewCanvasView: View {
     let project: RecordingProject
     let previewImage: NSImage?
@@ -46,6 +96,10 @@ struct PreviewCanvasView: View {
     @State private var isHoveringPreviewStage = false
     @State private var hasActivatedPlayback = false
     @State private var sourceVideoSize: CGSize?
+    @State private var playbackCommandID = 0
+    @State private var isPreviewPlaying = false
+    @State private var isScrubbingPlayback = false
+    @State private var scrubbedPlaybackTime: TimeInterval = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -53,41 +107,117 @@ struct PreviewCanvasView: View {
 
             previewControls
         }
+        .background(
+            PreviewKeyboardShortcutBridge(isEnabled: shouldShowFooterPlaybackControls) {
+                togglePlayback()
+            }
+        )
     }
 
     private var previewControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Label(previewTitle, systemImage: previewIconName)
-                Text(previewTimingLabel)
-                    .foregroundStyle(AppTheme.mutedText)
-                Spacer()
-                if previewVideoState.isWorking {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-                Button {
-                    onRefreshPreviewVideo()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh preview")
-                .disabled(previewVideoState.isWorking || project.sourceVideoURL == nil)
+            if shouldShowFooterPlaybackControls {
+                footerPlaybackControls
             }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.secondary)
+
+            if PreviewFooterMetadataPolicy.showsMetadataRow(
+                hasPlayablePreview: shouldShowFooterPlaybackControls,
+                previewState: previewVideoState
+            ) {
+                HStack(spacing: 12) {
+                    Label(previewTitle, systemImage: previewIconName)
+                    Text(previewTimingLabel)
+                        .foregroundStyle(AppTheme.mutedText)
+                    Spacer()
+                    if previewVideoState.isWorking {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
 
             if case .failed(let message) = previewVideoState {
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red.opacity(0.9))
-                    .lineLimit(2)
+                HStack(spacing: 10) {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red.opacity(0.9))
+                        .lineLimit(2)
+                    Spacer()
+                    if PreviewFooterMetadataPolicy.promotesRefreshAction(previewState: previewVideoState) {
+                        Button {
+                            onRefreshPreviewVideo()
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 12, weight: .medium))
+                        .disabled(project.sourceVideoURL == nil)
+                    }
+                }
             }
         }
         .padding(.horizontal, 18)
         .padding(.top, 12)
         .padding(.bottom, 16)
+    }
+
+    private var footerPlaybackControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                togglePlayback()
+            } label: {
+                Image(systemName: isPreviewPlaying ? "pause.fill" : "play.fill")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .help(isPreviewPlaying ? "Pause" : "Play")
+
+            Text(timestampLabel(for: playbackControlDisplayTime))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 68, alignment: .leading)
+
+            Slider(
+                value: Binding(
+                    get: {
+                        playbackControlDisplayTime.clamped(to: 0...max(previewDuration, 0))
+                    },
+                    set: { value in
+                        let displayTime = value.clamped(to: 0...max(previewDuration, 0))
+                        scrubbedPlaybackTime = displayTime
+                        hasActivatedPlayback = true
+                        onPlaybackTimeChange(displayTime)
+                    }
+                ),
+                in: 0...max(previewDuration, 0.001),
+                onEditingChanged: { isEditing in
+                    isScrubbingPlayback = isEditing
+                    if !isEditing {
+                        scrubbedPlaybackTime = previewTimestamp.clamped(to: 0...previewDuration)
+                    }
+                }
+            )
+
+            Text(timestampLabel(for: previewDuration))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 68, alignment: .trailing)
+        }
+        .frame(height: PreviewPlaybackControlsPlacement.footerHeight)
+        .padding(.horizontal, 14)
+        .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func togglePlayback() {
+        guard shouldShowFooterPlaybackControls else { return }
+        hasActivatedPlayback = true
+        playbackCommandID += 1
     }
 
     private var previewStage: some View {
@@ -102,13 +232,17 @@ struct PreviewCanvasView: View {
                 liveStylePlaybackStage(url: activePlaybackURL)
             } else if shouldShowPlayer, let activePlaybackURL {
                 PreviewVideoPlayerView(
-                    url: activePlaybackURL,
-                    seekTime: activePlaybackSeekTime,
-                    displayTime: previewTimestamp.clamped(to: 0...previewDuration),
-                    playbackTimeline: playbackTimeline,
-                    onDisplaySeekRequested: { displayTime in
-                        onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
-                    },
+                        url: activePlaybackURL,
+                        playbackCommandID: playbackCommandID,
+                        seekTime: activePlaybackSeekTime,
+                        displayTime: previewTimestamp.clamped(to: 0...previewDuration),
+                        playbackTimeline: playbackTimeline,
+                        onPlaybackStateChange: { isPlaying in
+                            isPreviewPlaying = isPlaying
+                        },
+                        onDisplaySeekRequested: { displayTime in
+                            onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
+                        },
                     onPlaybackTimeChange: { playbackTime in
                         updateTimelineFromPlayback(
                             playbackTime,
@@ -182,11 +316,14 @@ struct PreviewCanvasView: View {
                 sourceSize: sourceSize,
                 contentRect: contentRect,
                 snapshot: frameSnapshot,
-                preservesFullSourceAtBase: project.captureTarget == .window
+                preservesFullSourceAtBase: SourcePresentationPolicy.preservesFullSourceAtBase(
+                    captureTarget: project.captureTarget,
+                    padding: project.style.padding
+                )
             )
             let presenterStyle = project.style.presenterBubbleStyle
             let presenterLayout = PresenterOverlayGeometry.layout(
-                contentRect: contentRect,
+                contentRect: CGRect(origin: .zero, size: stageSize),
                 style: presenterStyle
             )
             let presenterVideoURL = presenterStyle.isEnabled ? project.presenterMedia?.sourceVideoURL : nil
@@ -198,6 +335,7 @@ struct PreviewCanvasView: View {
                 ZStack(alignment: .topLeading) {
                     PreviewVideoPlayerView(
                         url: url,
+                        playbackCommandID: playbackCommandID,
                         seekTime: activePlaybackSeekTime,
                         displayTime: previewTimestamp.clamped(to: 0...previewDuration),
                         playbackTimeline: playbackTimeline,
@@ -210,6 +348,9 @@ struct PreviewCanvasView: View {
                         presenterSeekTime: max(sourceTimestamp + (project.presenterMedia?.renderOffset ?? 0), 0),
                         presenterLayout: presenterLayout.frame.isEmpty ? nil : presenterLayout,
                         presenterShadowOpacity: presenterStyle.shadowOpacity,
+                        onPlaybackStateChange: { isPlaying in
+                            isPreviewPlaying = isPlaying
+                        },
                         onDisplaySeekRequested: { displayTime in
                             onPlaybackTimeChange(displayTime.clamped(to: 0...previewDuration))
                         },
@@ -267,6 +408,18 @@ struct PreviewCanvasView: View {
             displayDuration: previewDuration,
             usesSourceTimeline: activePlaybackUsesSourceTimeline
         )
+    }
+
+    private var shouldShowFooterPlaybackControls: Bool {
+        showsPlayablePreview && activePlaybackURL != nil
+    }
+
+    private var playbackControlDisplayTime: TimeInterval {
+        if isScrubbingPlayback {
+            return scrubbedPlaybackTime.clamped(to: 0...previewDuration)
+        }
+
+        return previewTimestamp.clamped(to: 0...previewDuration)
     }
 
     private func updateTimelineFromPlayback(_ playbackTime: TimeInterval, usesSourceTimeline: Bool) {
@@ -513,6 +666,7 @@ struct RealtimePreviewGeometry {
 
 private struct PreviewVideoPlayerView: NSViewRepresentable {
     let url: URL
+    let playbackCommandID: Int
     let seekTime: TimeInterval
     let displayTime: TimeInterval
     let playbackTimeline: PreviewPlaybackTimeline
@@ -525,6 +679,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     var presenterSeekTime: TimeInterval = 0
     var presenterLayout: PresenterOverlayLayout?
     var presenterShadowOpacity: Double = 0
+    let onPlaybackStateChange: (Bool) -> Void
     let onDisplaySeekRequested: (TimeInterval) -> Void
     let onPlaybackTimeChange: (TimeInterval) -> Void
     let onPlaybackEnded: () -> Void
@@ -542,6 +697,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     func updateNSView(_ nsView: StablePlayerContainerView, context: Context) {
         context.coordinator.onPlaybackTimeChange = onPlaybackTimeChange
         context.coordinator.onPlaybackEnded = onPlaybackEnded
+        context.coordinator.onPlaybackStateChange = onPlaybackStateChange
         context.coordinator.playbackTimeline = playbackTimeline
         nsView.updateRealtimeOverlay(
             snapshot: pointerSnapshot,
@@ -587,6 +743,11 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 force: true,
                 resumePlayback: shouldResumePlayback
             )
+            context.coordinator.handlePlaybackCommand(
+                playbackCommandID,
+                player: player,
+                container: nsView
+            )
             return
         }
 
@@ -598,6 +759,11 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 to: seekTime,
                 force: false,
                 resumePlayback: false
+            )
+            context.coordinator.handlePlaybackCommand(
+                playbackCommandID,
+                player: player,
+                container: nsView
             )
         }
     }
@@ -665,9 +831,11 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
         var isSeekingProgrammatically = false
         var timeObserver: Any?
         var endObserver: NSObjectProtocol?
+        var lastPlaybackCommandID = 0
         weak var observedPlayer: AVPlayer?
         var onPlaybackTimeChange: ((TimeInterval) -> Void)?
         var onPlaybackEnded: (() -> Void)?
+        var onPlaybackStateChange: ((Bool) -> Void)?
         var playbackTimeline: PreviewPlaybackTimeline?
         var presenterRenderOffset: TimeInterval = 0
 
@@ -693,6 +861,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 container?.updatePlaybackProgress(sourceTime: seconds)
                 container?.updatePresenterProgress(sourceTime: seconds + self.presenterRenderOffset)
                 self.onPlaybackTimeChange?(seconds)
+                self.onPlaybackStateChange?(player.rate != 0)
             }
         }
 
@@ -718,14 +887,44 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
                 guard let self, let player else { return }
                 player.pause()
                 container?.syncPresenterPlaybackState()
-                DispatchQueue.main.async { [weak self, weak container] in
-                    guard let self else { return }
-                    self.seekTime = 0
-                    self.lastPlaybackReportTime = 0
-                    container?.updatePlaybackProgress(displayTime: 0)
-                    self.onPlaybackEnded?()
+                self.onPlaybackStateChange?(false)
+                let resetSourceTime = self.playbackTimeline?.sourceTime(forDisplayTime: 0) ?? 0
+                self.isSeekingProgrammatically = true
+                player.seek(
+                    to: CMTime(seconds: resetSourceTime, preferredTimescale: 600),
+                    toleranceBefore: .zero,
+                    toleranceAfter: .zero
+                ) { [weak self, weak container] _ in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.isSeekingProgrammatically = false
+                        self.seekTime = resetSourceTime
+                        self.lastPlaybackReportTime = resetSourceTime
+                        container?.updatePlaybackProgress(displayTime: 0)
+                        container?.updatePresenterProgress(sourceTime: resetSourceTime + self.presenterRenderOffset)
+                        container?.syncPresenterPlaybackState()
+                        self.onPlaybackStateChange?(false)
+                        self.onPlaybackEnded?()
+                    }
                 }
             }
+        }
+
+        func handlePlaybackCommand(
+            _ commandID: Int,
+            player: AVPlayer,
+            container: StablePlayerContainerView
+        ) {
+            guard commandID != lastPlaybackCommandID else { return }
+            lastPlaybackCommandID = commandID
+
+            if player.rate == 0 {
+                player.play()
+            } else {
+                player.pause()
+            }
+            container.syncPresenterPlaybackState()
+            onPlaybackStateChange?(player.rate != 0)
         }
     }
 }
@@ -736,7 +935,6 @@ private final class StablePlayerContainerView: NSView {
     private let videoClipMaskLayer = CAShapeLayer()
     private let cursorOverlayView = CursorOverlayView()
     private let presenterOverlayView = PresenterBubblePlayerView()
-    private let controlsView = PlaybackControlsView()
     private var realtimeGeometry: RealtimePreviewGeometry?
     private var contentCornerRadius: CGFloat = 0
     private var playbackTimeline: PreviewPlaybackTimeline?
@@ -766,16 +964,10 @@ private final class StablePlayerContainerView: NSView {
         cursorOverlayView.translatesAutoresizingMaskIntoConstraints = true
         presenterOverlayView.translatesAutoresizingMaskIntoConstraints = true
 
-        controlsView.translatesAutoresizingMaskIntoConstraints = true
-
         addSubview(videoClipView)
         videoClipView.addSubview(playerView)
         addSubview(cursorOverlayView)
         addSubview(presenterOverlayView)
-        addSubview(controlsView)
-        controlsView.onPlaybackCommand = { [weak self] in
-            self?.syncPresenterPlaybackState()
-        }
 
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -795,13 +987,6 @@ private final class StablePlayerContainerView: NSView {
     override func layout() {
         super.layout()
         cursorOverlayView.frame = bounds
-        let controlsHeight: CGFloat = 46
-        controlsView.frame = CGRect(
-            x: 12,
-            y: max(bounds.height - controlsHeight - 12, 12),
-            width: max(bounds.width - 24, 120),
-            height: controlsHeight
-        )
         applyVideoGeometry()
         if let geometry = realtimeGeometry {
             playerView.frame = geometry.videoFrame.offsetBy(
@@ -812,15 +997,12 @@ private final class StablePlayerContainerView: NSView {
             playerView.frame = videoClipView.bounds
         }
         applyPresenterGeometry()
-        controlsView.layer?.zPosition = 100
         presenterOverlayView.layer?.zPosition = 75
         cursorOverlayView.layer?.zPosition = 50
     }
 
     func setPlayer(_ player: AVPlayer?) {
         playerView.player = player
-        controlsView.player = player
-        controlsView.updateState()
         syncPresenterPlaybackState()
     }
 
@@ -830,19 +1012,6 @@ private final class StablePlayerContainerView: NSView {
         onSeekRequested: @escaping (TimeInterval) -> Void
     ) {
         playbackTimeline = timeline
-        controlsView.updateTimeline(
-            displayTime: displayTime,
-            displayDuration: timeline.displayDuration,
-            onSeekRequested: { [weak self] displayTime in
-                if let self {
-                    let presenterTime = timeline.sourceTime(forDisplayTime: displayTime) + self.presenterRenderOffset
-                    self.seekPresenter(to: presenterTime)
-                    self.syncPresenterPlaybackState()
-                }
-                onSeekRequested(displayTime)
-            }
-        )
-        controlsView.updateState()
     }
 
     func updateRealtimeOverlay(
@@ -870,7 +1039,6 @@ private final class StablePlayerContainerView: NSView {
         cursorOverlayView.showsDebugOverlay = ProcessInfo.processInfo.environment["MOUSELENS_DEBUG_COORDINATES"] == "1"
         cursorOverlayView.needsDisplay = true
         needsLayout = true
-        controlsView.updateState()
     }
 
     func updatePresenterOverlay(
@@ -911,15 +1079,9 @@ private final class StablePlayerContainerView: NSView {
     }
 
     func updatePlaybackProgress(sourceTime: TimeInterval) {
-        if let playbackTimeline {
-            controlsView.updateDisplayTime(playbackTimeline.displayTime(forPlaybackTime: sourceTime))
-        }
-        controlsView.updateState()
     }
 
     func updatePlaybackProgress(displayTime: TimeInterval) {
-        controlsView.updateDisplayTime(displayTime)
-        controlsView.updateState()
     }
 
     func syncPresenterPlaybackState() {
@@ -998,8 +1160,102 @@ private final class StableAVPlayerView: AVPlayerView {
     }
 }
 
-private final class PresenterBubblePlayerView: AVPlayerView {
+private struct PreviewKeyboardShortcutBridge: NSViewRepresentable {
+    let isEnabled: Bool
+    let onToggle: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> KeyboardShortcutView {
+        let view = KeyboardShortcutView()
+        view.coordinator = context.coordinator
+        context.coordinator.view = view
+        context.coordinator.isEnabled = isEnabled
+        context.coordinator.onToggle = onToggle
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyboardShortcutView, context: Context) {
+        context.coordinator.view = nsView
+        context.coordinator.isEnabled = isEnabled
+        context.coordinator.onToggle = onToggle
+        context.coordinator.installMonitor()
+    }
+
+    static func dismantleNSView(_ nsView: KeyboardShortcutView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        weak var view: KeyboardShortcutView?
+        var isEnabled = false
+        var onToggle: (() -> Void)?
+        private var monitor: Any?
+
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.shouldHandle(event) else { return event }
+                self.onToggle?()
+                return nil
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
+
+        private func shouldHandle(_ event: NSEvent) -> Bool {
+            guard isEnabled else { return false }
+            guard let window = view?.window, event.window === window, window.isKeyWindow else { return false }
+            guard !Self.isEditingText(in: window) else { return false }
+            return PreviewKeyboardShortcutPolicy.shouldTogglePlayback(
+                keyCode: event.keyCode,
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                modifierFlags: event.modifierFlags
+            )
+        }
+
+        private static func isEditingText(in window: NSWindow) -> Bool {
+            if window.firstResponder is NSTextView {
+                return true
+            }
+            if window.firstResponder is NSTextField {
+                return true
+            }
+            return false
+        }
+    }
+}
+
+private final class KeyboardShortcutView: NSView {
+    weak var coordinator: PreviewKeyboardShortcutBridge.Coordinator?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window, window.firstResponder == nil else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+}
+
+private final class PresenterBubblePlayerView: NSView {
+    private let playerView = AVPlayerView()
     private let maskLayer = CAShapeLayer()
+    var player: AVPlayer? {
+        get { playerView.player }
+        set { playerView.player = newValue }
+    }
+
     var cornerRadius: CGFloat = 0 {
         didSet { updateMask() }
     }
@@ -1011,12 +1267,18 @@ private final class PresenterBubblePlayerView: AVPlayerView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        controlsStyle = .none
-        videoGravity = .resizeAspectFill
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         layer?.masksToBounds = false
         layer?.mask = maskLayer
+
+        playerView.controlsStyle = .none
+        playerView.videoGravity = .resizeAspectFill
+        playerView.wantsLayer = true
+        playerView.layer?.backgroundColor = NSColor.black.cgColor
+        playerView.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(playerView)
+
         translatesAutoresizingMaskIntoConstraints = true
         updateShadow()
     }
@@ -1032,6 +1294,10 @@ private final class PresenterBubblePlayerView: AVPlayerView {
 
     override func layout() {
         super.layout()
+        playerView.frame = bounds
+        playerView.layer?.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        playerView.layer?.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        playerView.layer?.transform = CATransform3DMakeScale(-1, 1, 1)
         updateMask()
     }
 

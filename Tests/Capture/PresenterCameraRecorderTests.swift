@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import XCTest
@@ -17,6 +18,19 @@ final class PresenterCameraRecorderTests: XCTestCase {
         XCTAssertEqual(session, PresenterRecordingSession(startedAt: startedAt, previewDeviceName: "Mock Camera"))
     }
 
+    func testPresenterRecorderExposesPreviewSessionWhileRecording() async throws {
+        let recorder = PresenterCameraRecorder(
+            writerFactory: .mockSuccess,
+            deviceProvider: .mockBuiltInCamera
+        )
+
+        XCTAssertNil(recorder.activePreviewSession)
+
+        _ = try await recorder.start()
+
+        XCTAssertNotNil(recorder.activePreviewSession)
+    }
+
     func testPresenterRecorderStopReturnsMediaWithNaturalSize() async throws {
         let startedAt = Date(timeIntervalSince1970: 24)
         let recorder = PresenterCameraRecorder(
@@ -32,6 +46,7 @@ final class PresenterCameraRecorderTests: XCTestCase {
         XCTAssertEqual(media?.startedAt, startedAt)
         XCTAssertEqual(media?.renderOffset, 0)
         XCTAssertEqual(media?.naturalSize, CGSize(width: 1280, height: 720))
+        XCTAssertNil(recorder.activePreviewSession)
     }
 
     func testPresenterRecorderUsesUpdatedRenderOffset() async throws {
@@ -47,6 +62,22 @@ final class PresenterCameraRecorderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(media?.renderOffset), 0.42, accuracy: 0.0001)
     }
 
+    func testPresenterRecorderThrowsWhenWriterStopFails() async throws {
+        let recorder = PresenterCameraRecorder(
+            writerFactory: .mockStopFailure,
+            deviceProvider: .mockBuiltInCamera
+        )
+
+        _ = try await recorder.start()
+
+        do {
+            _ = try await recorder.stop()
+            XCTFail("Expected presenter recorder stop to throw.")
+        } catch {
+            XCTAssertNil(recorder.activePreviewSession)
+        }
+    }
+
     func testPresenterRecorderCancelStopsWithoutMedia() async throws {
         let recorder = PresenterCameraRecorder(
             writerFactory: .mockSuccess,
@@ -54,10 +85,12 @@ final class PresenterCameraRecorderTests: XCTestCase {
         )
 
         _ = try await recorder.start()
+        XCTAssertNotNil(recorder.activePreviewSession)
         recorder.cancel()
         let media = try await recorder.stop()
 
         XCTAssertNil(media)
+        XCTAssertNil(recorder.activePreviewSession)
     }
 }
 
@@ -78,16 +111,27 @@ private extension PresenterCameraRecorder.WriterFactory {
             naturalSize: device.naturalSize
         )
     }
+
+    static let mockStopFailure = PresenterCameraRecorder.WriterFactory { _, device in
+        MockPresenterCameraWriter(
+            outputURL: URL(fileURLWithPath: "/tmp/mock-presenter.mov"),
+            naturalSize: device.naturalSize,
+            stopError: PresenterCameraRecorderError.unableToStart("Mock stop failure.")
+        )
+    }
 }
 
 private final class MockPresenterCameraWriter: PresenterCameraMovieWriting {
     let outputURL: URL
     let naturalSize: CGSize
+    let previewSession: AVCaptureSession? = AVCaptureSession()
+    let stopError: Error?
     private(set) var isRecording = false
 
-    init(outputURL: URL, naturalSize: CGSize) {
+    init(outputURL: URL, naturalSize: CGSize, stopError: Error? = nil) {
         self.outputURL = outputURL
         self.naturalSize = naturalSize
+        self.stopError = stopError
     }
 
     func start() async throws {
@@ -95,6 +139,10 @@ private final class MockPresenterCameraWriter: PresenterCameraMovieWriting {
     }
 
     func stop() async throws {
+        if let stopError {
+            isRecording = false
+            throw stopError
+        }
         isRecording = false
     }
 }

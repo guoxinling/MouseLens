@@ -156,6 +156,10 @@ final class AppWindowController: NSObject {
     private weak var appWindow: NSWindow?
     private var captureSetupPanel: NSPanel?
     private var recordingControlPanel: NSPanel?
+    private var presenterBubblePanel: NSPanel?
+    private var presenterBubbleTrackingFrame: NSRect?
+    private var presenterBubblePanelStyle: PresenterBubbleStyle?
+    private var presenterBubbleMoveHandler: ((NormalizedPoint) -> Void)?
     private var appWindowResizeObserver: NSObjectProtocol?
     private var activeSpaceObserver: NSObjectProtocol?
     private var activeApplicationObserver: NSObjectProtocol?
@@ -248,6 +252,22 @@ final class AppWindowController: NSObject {
         )
     }
 
+    func maximizeEditorWindowOnActiveScreen() {
+        controlledWindows.forEach { window in
+            configureStandardSpaceBehavior(window)
+            let visibleFrame = window.screen?.visibleFrame
+                ?? NSScreen.main?.visibleFrame
+                ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            let targetFrame = Self.editorPresentationFrame(visibleFrame: visibleFrame)
+            guard !NSEqualRects(window.frame, targetFrame) else { return }
+            window.setFrame(targetFrame, display: true, animate: true)
+        }
+    }
+
+    static func editorPresentationFrame(visibleFrame: NSRect) -> NSRect {
+        visibleFrame
+    }
+
     func prepareForCapture() async {
         guard !hiddenForCapture else { return }
         hiddenForCapture = true
@@ -255,6 +275,7 @@ final class AppWindowController: NSObject {
         let app = NSApplication.shared
         app.windows.forEach { window in
             guard !isRecordingControlPanel(window) else { return }
+            guard !isPresenterBubblePanel(window) else { return }
             window.orderOut(nil)
         }
 
@@ -353,12 +374,18 @@ final class AppWindowController: NSObject {
         appWindow.orderOut(nil)
     }
 
-    func showRecordingControlPanel<Content: View>(@ViewBuilder content: () -> Content) {
+    func showRecordingControlPanel<Content: View>(
+        contentSize: NSSize = NSSize(width: 360, height: 58),
+        @ViewBuilder content: () -> Content
+    ) {
         let panel = recordingControlPanel ?? makeRecordingControlPanel()
-        panel.contentViewController = NSHostingController(rootView: content())
+        panel.contentViewController = NSHostingController(
+            rootView: content()
+                .frame(width: contentSize.width, height: contentSize.height)
+        )
         recordingControlPanel = panel
 
-        positionRecordingControlPanel(panel)
+        positionRecordingControlPanel(panel, panelSize: contentSize)
         if !hiddenForCapture {
             NSApplication.shared.unhide(nil)
         }
@@ -367,6 +394,51 @@ final class AppWindowController: NSObject {
 
     func hideRecordingControlPanel() {
         recordingControlPanel?.orderOut(nil)
+    }
+
+    func showPresenterBubblePanel<Content: View>(
+        style: PresenterBubbleStyle,
+        trackingFrame: NSRect? = nil,
+        @ViewBuilder content: () -> Content,
+        onMove: @escaping (NormalizedPoint) -> Void
+    ) {
+        let panel = presenterBubblePanel ?? makePresenterBubblePanel()
+        let hadVisiblePanel = panel.isVisible
+        let previousTrackingFrame = presenterBubbleTrackingFrame
+        let size = presenterBubblePanelSize(for: style)
+        let shouldReuseContent = Self.shouldReusePresenterBubblePanelContent(
+            isVisible: hadVisiblePanel,
+            previousStyle: presenterBubblePanelStyle,
+            newStyle: style,
+            previousTrackingFrame: previousTrackingFrame,
+            newTrackingFrame: trackingFrame
+        )
+        if !shouldReuseContent {
+            panel.contentViewController = NSHostingController(
+                rootView: content()
+                    .frame(width: size.width, height: size.height)
+            )
+            panel.setContentSize(size)
+        }
+        presenterBubbleTrackingFrame = trackingFrame
+        presenterBubblePanelStyle = style
+        presenterBubbleMoveHandler = onMove
+        presenterBubblePanel = panel
+        configureCaptureToolbarSpaceBehavior(panel)
+        if hadVisiblePanel, previousTrackingFrame != trackingFrame {
+            notifyPresenterBubblePanelMoved(panel)
+        } else if !hadVisiblePanel || !shouldReuseContent {
+            positionPresenterBubblePanel(panel, style: style)
+        }
+        if !hadVisiblePanel {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    func hidePresenterBubblePanel() {
+        presenterBubblePanel?.orderOut(nil)
+        presenterBubbleTrackingFrame = nil
+        presenterBubblePanelStyle = nil
     }
 
     private func configureAppWindows(
@@ -417,6 +489,7 @@ final class AppWindowController: NSObject {
         return NSApplication.shared.windows.filter { window in
             !isRecordingControlPanel(window) &&
                 !isCaptureSetupPanel(window) &&
+                !isPresenterBubblePanel(window) &&
                 window.canBecomeKey &&
                 !window.isSheet
         }
@@ -490,6 +563,27 @@ final class AppWindowController: NSObject {
         return panel
     }
 
+    private func makePresenterBubblePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 164, height: 164),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.backgroundColor = .clear
+        panel.collectionBehavior = Self.captureToolbarCollectionBehavior
+        panel.canHide = false
+        panel.delegate = self
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.isOpaque = false
+        panel.isReleasedWhenClosed = false
+        panel.level = .statusBar
+        panel.sharingType = .none
+        return panel
+    }
+
     private func makeCaptureSetupPanel() -> NSPanel {
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: Self.captureSetupContentSize),
@@ -522,15 +616,38 @@ final class AppWindowController: NSObject {
         panel.setContentSize(captureSetupContentSize)
     }
 
-    private func positionRecordingControlPanel(_ panel: NSPanel) {
+    private func positionRecordingControlPanel(
+        _ panel: NSPanel,
+        panelSize: NSSize = NSSize(width: 360, height: 58)
+    ) {
         let screenFrame = preferredOverlayVisibleFrame()
-        let panelSize = NSSize(width: 360, height: 58)
         let origin = NSPoint(
             x: screenFrame.midX - (panelSize.width / 2),
             y: screenFrame.maxY - panelSize.height - 18
         )
 
         panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+    }
+
+    private func presenterBubblePanelSize(for style: PresenterBubbleStyle) -> NSSize {
+        let visibleFrame = preferredOverlayVisibleFrame()
+        let shortestSide = min(visibleFrame.width, visibleFrame.height)
+        let side = (shortestSide * CGFloat(style.normalizedSize)).clamped(to: 96...260)
+        return NSSize(width: side, height: side)
+    }
+
+    private func positionPresenterBubblePanel(_ panel: NSPanel, style: PresenterBubbleStyle) {
+        let visibleFrame = presenterBubbleReferenceFrame()
+        let size = panel.frame.size
+        let halfWidth = size.width / 2
+        let halfHeight = size.height / 2
+        let center = NSPoint(
+            x: (visibleFrame.minX + visibleFrame.width * CGFloat(style.normalizedCenter.x))
+                .clamped(to: (visibleFrame.minX + halfWidth)...(visibleFrame.maxX - halfWidth)),
+            y: (visibleFrame.minY + visibleFrame.height * (1 - CGFloat(style.normalizedCenter.y)))
+                .clamped(to: (visibleFrame.minY + halfHeight)...(visibleFrame.maxY - halfHeight))
+        )
+        panel.setFrameOrigin(NSPoint(x: center.x - halfWidth, y: center.y - halfHeight))
     }
 
     private func configureCaptureToolbarSpaceBehavior(_ window: NSWindow) {
@@ -564,13 +681,15 @@ final class AppWindowController: NSObject {
 
     private func refreshOverlayWindowsForCurrentSpace() {
         if let panel = recordingControlPanel, panel.isVisible {
-            positionRecordingControlPanel(panel)
-            return
+            positionRecordingControlPanel(panel, panelSize: panel.contentLayoutRect.size)
         }
 
         if let panel = captureSetupPanel, panel.isVisible {
             positionCaptureToolbarOnActiveScreen(panel)
-            return
+        }
+
+        if let panel = presenterBubblePanel, panel.isVisible {
+            notifyPresenterBubblePanelMoved(panel)
         }
 
         guard
@@ -595,6 +714,54 @@ final class AppWindowController: NSObject {
             x: visibleFrame.midX - (toolbarSize.width / 2),
             y: visibleFrame.minY + bottomMargin
         )
+    }
+
+    static func presenterBubbleNormalizedCenter(
+        panelFrame: NSRect,
+        visibleFrame: NSRect,
+        edgeTolerance: CGFloat? = nil
+    ) -> NormalizedPoint {
+        guard visibleFrame.width > 0, visibleFrame.height > 0 else {
+            return NormalizedPoint(x: 0.5, y: 0.5)
+        }
+
+        let edgeSnapTolerance = edgeTolerance ?? presenterBubbleEdgeSnapTolerance(for: panelFrame.size)
+        let normalizedX: Double
+        if panelFrame.minX <= visibleFrame.minX + edgeSnapTolerance {
+            normalizedX = 0
+        } else if panelFrame.maxX >= visibleFrame.maxX - edgeSnapTolerance {
+            normalizedX = 1
+        } else {
+            normalizedX = Double(((panelFrame.midX - visibleFrame.minX) / visibleFrame.width).clamped(to: 0...1))
+        }
+
+        let normalizedY: Double
+        if panelFrame.maxY >= visibleFrame.maxY - edgeSnapTolerance {
+            normalizedY = 0
+        } else if panelFrame.minY <= visibleFrame.minY + edgeSnapTolerance {
+            normalizedY = 1
+        } else {
+            normalizedY = Double((1 - ((panelFrame.midY - visibleFrame.minY) / visibleFrame.height)).clamped(to: 0...1))
+        }
+
+        return NormalizedPoint(x: normalizedX, y: normalizedY)
+    }
+
+    private static func presenterBubbleEdgeSnapTolerance(for panelSize: NSSize) -> CGFloat {
+        let shortestSide = min(panelSize.width, panelSize.height)
+        return max(24, min(shortestSide * 1.15, 220))
+    }
+
+    static func shouldReusePresenterBubblePanelContent(
+        isVisible: Bool,
+        previousStyle: PresenterBubbleStyle?,
+        newStyle: PresenterBubbleStyle,
+        previousTrackingFrame: NSRect?,
+        newTrackingFrame: NSRect?
+    ) -> Bool {
+        isVisible
+            && previousStyle == newStyle
+            && previousTrackingFrame == newTrackingFrame
     }
 
     private func observeAppWindowResize(_ window: NSWindow) {
@@ -649,6 +816,33 @@ final class AppWindowController: NSObject {
         return window === captureSetupPanel
     }
 
+    private func isPresenterBubblePanel(_ window: NSWindow) -> Bool {
+        guard let presenterBubblePanel else { return false }
+        return window === presenterBubblePanel
+    }
+
+    private func notifyPresenterBubblePanelMoved(_ panel: NSWindow) {
+        let visibleFrame = presenterBubbleReferenceFrame()
+        presenterBubbleMoveHandler?(
+            Self.presenterBubbleNormalizedCenter(
+                panelFrame: panel.frame,
+                visibleFrame: visibleFrame
+            )
+        )
+    }
+
+    private func presenterBubbleReferenceFrame() -> NSRect {
+        guard
+            let trackingFrame = presenterBubbleTrackingFrame,
+            trackingFrame.width > 0,
+            trackingFrame.height > 0
+        else {
+            return preferredOverlayVisibleFrame()
+        }
+
+        return trackingFrame
+    }
+
     @objc private func handleCaptureSetupPanelCloseButton(_ sender: Any?) {
         dismissFloatingCaptureToolbar()
     }
@@ -659,6 +853,11 @@ extension AppWindowController: NSWindowDelegate {
         guard sender === captureSetupPanel else { return true }
         dismissFloatingCaptureToolbar()
         return false
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let panel = notification.object as? NSWindow, panel === presenterBubblePanel else { return }
+        notifyPresenterBubblePanelMoved(panel)
     }
 }
 

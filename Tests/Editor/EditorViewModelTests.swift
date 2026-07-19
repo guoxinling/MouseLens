@@ -320,7 +320,7 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.isPresenterBubbleEnabled)
         XCTAssertEqual(viewModel.presenterBubblePosition, .bottomRight)
         XCTAssertEqual(viewModel.presenterBubbleSize, 0.26, accuracy: 0.0001)
-        XCTAssertEqual(viewModel.presenterBubbleShape, .roundedRect)
+        XCTAssertEqual(viewModel.presenterBubbleCornerRadiusRatio, 0.22, accuracy: 0.0001)
     }
 
     func testConfiguringEditorWithoutPresenterMediaHidesPresenterControls() {
@@ -339,15 +339,37 @@ final class EditorViewModelTests: XCTestCase {
 
         viewModel.updatePresenterBubblePosition(.topLeft)
         viewModel.updatePresenterBubbleSize(0.31)
-        viewModel.updatePresenterBubbleShape(.circle)
+        viewModel.updatePresenterBubbleCornerRadiusRatio(0.5)
         viewModel.updatePresenterBubbleEnabled(false)
 
         let style = viewModel.project?.style.presenterBubbleStyle
         XCTAssertEqual(style?.position, .topLeft)
         XCTAssertEqual(style?.normalizedSize ?? -1, 0.31, accuracy: 0.0001)
-        XCTAssertEqual(style?.shape, .circle)
+        XCTAssertEqual(style?.cornerRadiusRatio ?? -1, 0.5, accuracy: 0.0001)
         XCTAssertEqual(style?.isEnabled, false)
         XCTAssertEqual(viewModel.project?.presenterMedia, project.presenterMedia)
+    }
+
+    func testPresenterBubbleCornerPresetsUseVisibleCanvasEdges() {
+        let project = makeProjectWithPresenterBubble()
+        let viewModel = makeViewModel()
+        viewModel.configure(for: project)
+
+        viewModel.updatePresenterBubblePosition(.topLeft)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.x ?? -1, 0, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.y ?? -1, 0, accuracy: 0.0001)
+
+        viewModel.updatePresenterBubblePosition(.topRight)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.x ?? -1, 1, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.y ?? -1, 0, accuracy: 0.0001)
+
+        viewModel.updatePresenterBubblePosition(.bottomLeft)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.x ?? -1, 0, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.y ?? -1, 1, accuracy: 0.0001)
+
+        viewModel.updatePresenterBubblePosition(.bottomRight)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.x ?? -1, 1, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.y ?? -1, 1, accuracy: 0.0001)
     }
 
     func testPreviewTimestampClampsToProjectDuration() {
@@ -767,6 +789,50 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(timeline.sourceTime(forDisplayTime: 0.0), 10.0, accuracy: 0.0001)
         XCTAssertEqual(timeline.sourceTime(forDisplayTime: 2.5), 12.5, accuracy: 0.0001)
         XCTAssertEqual(timeline.sourceTime(forDisplayTime: 5.0), 15.0, accuracy: 0.0001)
+    }
+
+    func testPlaybackControlsFooterSitsOutsidePreviewStage() {
+        let stageFrame = CGRect(x: 40, y: 20, width: 1280, height: 720)
+
+        let footerFrame = PreviewPlaybackControlsPlacement.footerFrame(below: stageFrame)
+
+        XCTAssertEqual(footerFrame.minY, stageFrame.maxY, accuracy: 0.0001)
+        XCTAssertEqual(footerFrame.width, stageFrame.width, accuracy: 0.0001)
+        XCTAssertFalse(footerFrame.intersects(stageFrame))
+    }
+
+    func testPlayablePreviewHidesRedundantMetadataRow() {
+        XCTAssertFalse(
+            PreviewFooterMetadataPolicy.showsMetadataRow(
+                hasPlayablePreview: true,
+                previewState: .ready
+            )
+        )
+    }
+
+    func testPreviewRefreshIsOnlyPromotedWhenPreviewFailed() {
+        XCTAssertFalse(PreviewFooterMetadataPolicy.promotesRefreshAction(previewState: .ready))
+        XCTAssertTrue(PreviewFooterMetadataPolicy.promotesRefreshAction(previewState: .failed("Preview failed")))
+    }
+
+    func testSpaceKeyTogglesPlayablePreview() {
+        XCTAssertTrue(
+            PreviewKeyboardShortcutPolicy.shouldTogglePlayback(
+                keyCode: 49,
+                charactersIgnoringModifiers: " ",
+                modifierFlags: []
+            )
+        )
+    }
+
+    func testModifiedSpaceKeyDoesNotTogglePlayablePreview() {
+        XCTAssertFalse(
+            PreviewKeyboardShortcutPolicy.shouldTogglePlayback(
+                keyCode: 49,
+                charactersIgnoringModifiers: " ",
+                modifierFlags: [.command]
+            )
+        )
     }
 
     func testWindowPointerNormalizationUsesScreenCaptureKitWindowCoordinates() {

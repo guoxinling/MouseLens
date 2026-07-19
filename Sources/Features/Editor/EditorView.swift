@@ -228,7 +228,7 @@ struct EditorView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    MetricSlider(label: "Padding", value: $viewModel.padding, range: 0.02...0.2)
+                    MetricSlider(label: "Padding", value: $viewModel.padding, range: 0...0.2)
                     MetricSlider(label: "Corner Radius", value: $viewModel.cornerRadius, range: 0...42)
                 }
 
@@ -426,18 +426,14 @@ struct EditorView: View {
             )
             .disabled(!viewModel.isPresenterBubbleEnabled)
 
-            Picker(
-                "Shape",
-                selection: Binding(
-                    get: { viewModel.presenterBubbleShape },
-                    set: { viewModel.updatePresenterBubbleShape($0) }
-                )
-            ) {
-                ForEach(PresenterBubbleShape.allCases, id: \.self) { shape in
-                    Text(presenterShapeLabel(for: shape)).tag(shape)
-                }
-            }
-            .pickerStyle(.segmented)
+            MetricSlider(
+                label: "Corner Radius",
+                value: Binding(
+                    get: { viewModel.presenterBubbleCornerRadiusRatio },
+                    set: { viewModel.updatePresenterBubbleCornerRadiusRatio($0) }
+                ),
+                range: 0...0.5
+            )
             .disabled(!viewModel.isPresenterBubbleEnabled)
         }
         .font(.system(size: 13))
@@ -449,13 +445,6 @@ struct EditorView: View {
         case .topRight: "Top Right"
         case .bottomLeft: "Bottom Left"
         case .bottomRight: "Bottom Right"
-        }
-    }
-
-    private func presenterShapeLabel(for shape: PresenterBubbleShape) -> String {
-        switch shape {
-        case .circle: "Circle"
-        case .roundedRect: "Rounded"
         }
     }
 

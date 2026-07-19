@@ -607,6 +607,7 @@ final class ScreenRecorder {
         let shareableContent = try await loadShareableContent()
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let metadataByWindowID = Self.onScreenWindowMetadata()
+        let screenBounds = Self.unionRect(for: NSScreen.screens.map(\.frame))
         return selectableWindows(in: shareableContent, metadataByWindowID: metadataByWindowID)
             .sorted { lhs, rhs in
                 windowPriority(
@@ -627,7 +628,12 @@ final class ScreenRecorder {
                     id: window.windowID,
                     appName: appName,
                     title: title,
-                    frame: CaptureViewport(rect: window.frame)
+                    frame: CaptureViewport(
+                        rect: Self.appKitViewport(
+                            fromScreenCaptureKitRect: window.frame,
+                            screenBounds: screenBounds
+                        )
+                    )
                 )
             }
     }
@@ -839,7 +845,14 @@ final class ScreenRecorder {
             throw ScreenRecorderError.noShareableContent
         }
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let currentApp = shareableContent.applications.filter { application in
+            Self.isWindowOwnedByCurrentApp(
+                bundleIdentifier: application.bundleIdentifier,
+                processID: application.processID,
+                applicationName: application.applicationName
+            )
+        }
+        let filter = SCContentFilter(display: display, excludingApplications: currentApp, exceptingWindows: [])
         return CaptureSource(
             filter: filter,
             viewport: CaptureViewport(rect: filter.contentRect),
@@ -1034,7 +1047,7 @@ final class ScreenRecorder {
         }
     }
 
-    private static func appKitViewport(fromScreenCaptureKitRect rect: CGRect, screenBounds: CGRect) -> CGRect {
+    static func appKitViewport(fromScreenCaptureKitRect rect: CGRect, screenBounds: CGRect) -> CGRect {
         CGRect(
             x: rect.minX,
             y: screenBounds.minY + screenBounds.height - (rect.minY - screenBounds.minY) - rect.height,

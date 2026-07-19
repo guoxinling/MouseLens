@@ -965,6 +965,12 @@ struct SourceCropPlanner {
     }
 }
 
+enum SourcePresentationPolicy {
+    static func preservesFullSourceAtBase(captureTarget: CaptureTarget, padding: Double) -> Bool {
+        captureTarget == .window && padding > 0.0001
+    }
+}
+
 struct RenderLayout {
     let renderSize: CGSize
     let fullRect: CGRect
@@ -998,6 +1004,7 @@ struct PresenterExportOverlayPlan: Equatable {
     static func make(
         for project: RecordingProject,
         layout renderLayout: RenderLayout,
+        anchorRect: CGRect? = nil,
         sourceTimestamp: TimeInterval,
         fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) -> PresenterExportOverlayPlan? {
@@ -1009,7 +1016,7 @@ struct PresenterExportOverlayPlan: Equatable {
         guard fileExists(sourceVideoURL) else { return nil }
 
         let overlayLayout = PresenterOverlayGeometry.layout(
-            contentRect: renderLayout.contentRect,
+            contentRect: anchorRect ?? renderLayout.fullRect,
             style: style
         )
         guard overlayLayout.frame.isEmpty == false else { return nil }
@@ -1232,9 +1239,17 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         let time = CMTime(seconds: clampedTimestamp, preferredTimescale: 600)
         let sourceFrame = try await generateSourceFrame(from: generator, at: time)
         let preparedAssets = prepareAssets(renderSize: renderSize, style: project.style)
+        let sourceImage = CIImage(cgImage: sourceFrame)
+        let presenterAnchorRect = presenterAnchorRect(
+            for: sourceImage.extent,
+            snapshot: snapshot,
+            project: project,
+            layout: preparedAssets.layout
+        )
         let presenterPlan = PresenterExportOverlayPlan.make(
             for: project,
             layout: preparedAssets.layout,
+            anchorRect: presenterAnchorRect,
             sourceTimestamp: clampedTimestamp
         )
         let presenterFrame: CGImage?
@@ -1252,7 +1267,6 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { [self] in
-                let sourceImage = CIImage(cgImage: sourceFrame)
                 let composedFrame = composeFrame(
                     from: sourceImage,
                     snapshot: snapshot,
@@ -1607,9 +1621,23 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         try await forEachRenderFrameTiming(in: clipSegments, frameRate: frameRate) { timing in
             let sourceTime = CMTime(seconds: timing.timestamp, preferredTimescale: 600)
             let sourceFrame = try await generateSourceFrame(from: generator, at: sourceTime)
+            let sourceImage = CIImage(cgImage: sourceFrame)
+            let snapshot = composer.snapshot(
+                at: timing.timestamp,
+                from: project.cameraKeyframes,
+                manualZoomSegments: project.manualZoomSegments,
+                zoomTrackEdited: project.zoomTrackEdited
+            )
+            let presenterAnchorRect = presenterAnchorRect(
+                for: sourceImage.extent,
+                snapshot: snapshot,
+                project: project,
+                layout: preparedAssets.layout
+            )
             let presenterPlan = PresenterExportOverlayPlan.make(
                 for: project,
                 layout: preparedAssets.layout,
+                anchorRect: presenterAnchorRect,
                 sourceTimestamp: timing.timestamp
             )
             let presenterFrame: CGImage?
@@ -1626,7 +1654,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
             let composedFrame = try autoreleasepool {
                 try makeComposedSourceFrame(
-                    from: sourceFrame,
+                    from: sourceImage,
                     at: timing.timestamp,
                     project: project,
                     preparedAssets: preparedAssets,
@@ -1966,7 +1994,10 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             for: sourceImage.extent,
             contentRect: preparedAssets.layout.contentRect,
             snapshot: snapshot,
-            captureTarget: project.captureTarget
+            preservesFullSourceAtBase: SourcePresentationPolicy.preservesFullSourceAtBase(
+                captureTarget: project.captureTarget,
+                padding: project.style.padding
+            )
         )
         let cropRect = presentation.cropRect
         let displayRect = presentation.displayRect
@@ -2033,7 +2064,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     }
 
     private func makeComposedSourceFrame(
-        from sourceFrame: CGImage,
+        from sourceImage: CIImage,
         at timestamp: TimeInterval,
         project: RecordingProject,
         preparedAssets: PreparedRenderAssets,
@@ -2042,7 +2073,6 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         includesCursor: Bool,
         includesClickFeedback: Bool
     ) throws -> CIImage {
-        let sourceImage = CIImage(cgImage: sourceFrame)
         let snapshot = composer.snapshot(
             at: timestamp,
             from: project.cameraKeyframes,
@@ -2070,6 +2100,15 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         .cropped(to: preparedAssets.layout.fullRect)
     }
 
+    private func presenterAnchorRect(
+        for sourceExtent: CGRect,
+        snapshot: FrameSnapshot,
+        project: RecordingProject,
+        layout: RenderLayout
+    ) -> CGRect {
+        layout.fullRect
+    }
+
     private func coreImageRect(fromTopOriginRect rect: CGRect, in fullRect: CGRect) -> CGRect {
         CGRect(
             x: rect.minX,
@@ -2095,11 +2134,19 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         guard ciFrame.width > 0, ciFrame.height > 0 else { return image }
 
         let presenterImage = CIImage(cgImage: presenterFrame)
+        let mirroredPresenterImage = presenterImage
+            .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+            .transformed(
+                by: CGAffineTransform(
+                    translationX: presenterImage.extent.width,
+                    y: 0
+                )
+            )
         let scale = max(
-            ciFrame.width / max(presenterImage.extent.width, 1),
-            ciFrame.height / max(presenterImage.extent.height, 1)
+            ciFrame.width / max(mirroredPresenterImage.extent.width, 1),
+            ciFrame.height / max(mirroredPresenterImage.extent.height, 1)
         )
-        let scaled = presenterImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let scaled = mirroredPresenterImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let translated = scaled.transformed(
             by: CGAffineTransform(
                 translationX: ciFrame.midX - scaled.extent.midX,

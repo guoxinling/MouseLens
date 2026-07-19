@@ -111,6 +111,145 @@ final class AppWindowControllerTests: XCTestCase {
         XCTAssertFalse(behavior.contains(.stationary))
     }
 
+    func testPresenterBubbleDragSnapsToVisibleFrameEdges() {
+        let visibleFrame = NSRect(x: 100, y: 50, width: 1200, height: 800)
+        let bubbleSize = NSSize(width: 160, height: 160)
+
+        let bottomRight = AppWindowController.presenterBubbleNormalizedCenter(
+            panelFrame: NSRect(
+                x: visibleFrame.maxX - bubbleSize.width,
+                y: visibleFrame.minY,
+                width: bubbleSize.width,
+                height: bubbleSize.height
+            ),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(bottomRight.x, 1, accuracy: 0.0001)
+        XCTAssertEqual(bottomRight.y, 1, accuracy: 0.0001)
+
+        let topLeft = AppWindowController.presenterBubbleNormalizedCenter(
+            panelFrame: NSRect(
+                x: visibleFrame.minX,
+                y: visibleFrame.maxY - bubbleSize.height,
+                width: bubbleSize.width,
+                height: bubbleSize.height
+            ),
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(topLeft.x, 0, accuracy: 0.0001)
+        XCTAssertEqual(topLeft.y, 0, accuracy: 0.0001)
+    }
+
+    func testPresenterBubblePanelReusesContentForRedundantShow() {
+        let style = PresenterBubbleStyle(
+            isEnabled: true,
+            normalizedCenter: NormalizedPoint(x: 1, y: 1),
+            normalizedSize: 0.24,
+            cornerRadiusRatio: 0.5,
+            shadowOpacity: 0.24
+        )
+        let trackingFrame = NSRect(x: 100, y: 80, width: 1200, height: 800)
+
+        XCTAssertTrue(
+            AppWindowController.shouldReusePresenterBubblePanelContent(
+                isVisible: true,
+                previousStyle: style,
+                newStyle: style,
+                previousTrackingFrame: trackingFrame,
+                newTrackingFrame: trackingFrame
+            )
+        )
+    }
+
+    func testPresenterBubblePanelRebuildsContentWhenStyleChanges() {
+        let previousStyle = PresenterBubbleStyle(
+            isEnabled: true,
+            normalizedCenter: NormalizedPoint(x: 1, y: 1),
+            normalizedSize: 0.24,
+            cornerRadiusRatio: 0.5,
+            shadowOpacity: 0.24
+        )
+        let nextStyle = PresenterBubbleStyle(
+            isEnabled: true,
+            normalizedCenter: NormalizedPoint(x: 0, y: 1),
+            normalizedSize: 0.24,
+            cornerRadiusRatio: 0.5,
+            shadowOpacity: 0.24
+        )
+
+        XCTAssertFalse(
+            AppWindowController.shouldReusePresenterBubblePanelContent(
+                isVisible: true,
+                previousStyle: previousStyle,
+                newStyle: nextStyle,
+                previousTrackingFrame: nil,
+                newTrackingFrame: nil
+            )
+        )
+    }
+
+    func testPresenterBubbleDragNearVisibleFrameEdgesSnapsToEdges() {
+        let visibleFrame = NSRect(x: 100, y: 50, width: 1200, height: 800)
+        let bubbleSize = NSSize(width: 160, height: 160)
+
+        let bottomRight = AppWindowController.presenterBubbleNormalizedCenter(
+            panelFrame: NSRect(
+                x: visibleFrame.maxX - bubbleSize.width - 64,
+                y: visibleFrame.minY + 56,
+                width: bubbleSize.width,
+                height: bubbleSize.height
+            ),
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(bottomRight.x, 1, accuracy: 0.0001)
+        XCTAssertEqual(bottomRight.y, 1, accuracy: 0.0001)
+    }
+
+    func testPresenterBubbleDragWithinOneBubbleWidthOfEdgeSnapsToEdge() {
+        let visibleFrame = NSRect(x: 100, y: 50, width: 1200, height: 800)
+        let bubbleSize = NSSize(width: 160, height: 160)
+
+        let bottomRight = AppWindowController.presenterBubbleNormalizedCenter(
+            panelFrame: NSRect(
+                x: visibleFrame.maxX - bubbleSize.width - 132,
+                y: visibleFrame.minY + 128,
+                width: bubbleSize.width,
+                height: bubbleSize.height
+            ),
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(bottomRight.x, 1, accuracy: 0.0001)
+        XCTAssertEqual(bottomRight.y, 1, accuracy: 0.0001)
+    }
+
+    func testPresenterBubbleDragUsesCenterAwayFromEdges() {
+        let visibleFrame = NSRect(x: 100, y: 50, width: 1200, height: 800)
+        let center = AppWindowController.presenterBubbleNormalizedCenter(
+            panelFrame: NSRect(x: 580, y: 370, width: 160, height: 160),
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(center.x, 0.4667, accuracy: 0.0001)
+        XCTAssertEqual(center.y, 0.5, accuracy: 0.0001)
+    }
+
+    func testWindowTargetFrameConvertsScreenCaptureKitRectToAppKitCoordinates() {
+        let screenBounds = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let screenCaptureKitRect = CGRect(x: 200, y: 120, width: 900, height: 600)
+
+        let appKitRect = ScreenRecorder.appKitViewport(
+            fromScreenCaptureKitRect: screenCaptureKitRect,
+            screenBounds: screenBounds
+        )
+
+        XCTAssertEqual(appKitRect.origin.x, 200, accuracy: 0.0001)
+        XCTAssertEqual(appKitRect.origin.y, 262, accuracy: 0.0001)
+        XCTAssertEqual(appKitRect.size.width, 900, accuracy: 0.0001)
+        XCTAssertEqual(appKitRect.size.height, 600, accuracy: 0.0001)
+    }
+
     func testApplyEditorWindowLayoutRestoresNormalLevelAndSpaceBehavior() {
         let controller = AppWindowController()
         let window = NSWindow(
@@ -129,6 +268,14 @@ final class AppWindowControllerTests: XCTestCase {
         XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
         XCTAssertFalse(window.collectionBehavior.contains(.fullScreenAuxiliary))
         XCTAssertFalse(window.collectionBehavior.contains(.stationary))
+    }
+
+    func testEditorPresentationFrameUsesVisibleFrameForMaximizedPreview() {
+        let visibleFrame = NSRect(x: 80, y: 40, width: 1440, height: 900)
+
+        let frame = AppWindowController.editorPresentationFrame(visibleFrame: visibleFrame)
+
+        XCTAssertEqual(frame, visibleFrame)
     }
 
 }

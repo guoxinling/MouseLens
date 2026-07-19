@@ -3,6 +3,8 @@ import CoreGraphics
 import Foundation
 
 protocol PresenterCameraRecording {
+    var activePreviewSession: AVCaptureSession? { get }
+
     func start() async throws -> PresenterRecordingSession
     func updateRenderOffset(_ offset: TimeInterval)
     func stop() async throws -> PresenterMedia?
@@ -17,6 +19,7 @@ struct PresenterRecordingSession: Equatable {
 protocol PresenterCameraMovieWriting: AnyObject {
     var outputURL: URL { get }
     var naturalSize: CGSize { get }
+    var previewSession: AVCaptureSession? { get }
 
     func start() async throws
     func stop() async throws
@@ -103,6 +106,10 @@ final class PresenterCameraRecorder: PresenterCameraRecording {
     private let outputURLProvider: () -> URL
     private var activeRecording: ActiveRecording?
 
+    var activePreviewSession: AVCaptureSession? {
+        activeRecording?.writer.previewSession
+    }
+
     init(
         writerFactory: WriterFactory = .live,
         deviceProvider: DeviceProvider = .live,
@@ -165,13 +172,21 @@ final class PresenterCameraRecorder: PresenterCameraRecording {
     }
 }
 
-private final class LivePresenterCameraWriter: NSObject, PresenterCameraMovieWriting, AVCaptureFileOutputRecordingDelegate {
+private final class LivePresenterCameraWriter: NSObject, PresenterCameraMovieWriting, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     let outputURL: URL
     let naturalSize: CGSize
+    var previewSession: AVCaptureSession? { session }
 
     private let session = AVCaptureSession()
-    private let movieOutput = AVCaptureMovieFileOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private let recordingQueue = DispatchQueue(label: "MouseLens.PresenterCameraWriter")
+    private var assetWriter: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var didStartSession = false
+    private var didAppendFrame = false
+    private var isStopping = false
     private var stopContinuation: CheckedContinuation<Void, Error>?
+    private var stopContinuationResumed = false
 
     init(outputURL: URL, device: AVCaptureDevice, naturalSize: CGSize) throws {
         self.outputURL = outputURL
@@ -190,10 +205,15 @@ private final class LivePresenterCameraWriter: NSObject, PresenterCameraMovieWri
         }
         session.addInput(input)
 
-        guard session.canAddOutput(movieOutput) else {
-            throw PresenterCameraRecorderError.unableToStart("MouseLens could not attach the camera movie output.")
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+        ]
+        videoOutput.setSampleBufferDelegate(self, queue: recordingQueue)
+        guard session.canAddOutput(videoOutput) else {
+            throw PresenterCameraRecorderError.unableToStart("MouseLens could not attach the camera video output.")
         }
-        session.addOutput(movieOutput)
+        session.addOutput(videoOutput)
     }
 
     func start() async throws {
@@ -201,34 +221,131 @@ private final class LivePresenterCameraWriter: NSObject, PresenterCameraMovieWri
             try FileManager.default.removeItem(at: outputURL)
         }
 
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let input = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: Int(naturalSize.width),
+                AVVideoHeightKey: Int(naturalSize.height),
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 8_000_000,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+                ]
+            ]
+        )
+        input.expectsMediaDataInRealTime = true
+        guard writer.canAdd(input) else {
+            throw PresenterCameraRecorderError.unableToStart("MouseLens could not attach the camera asset writer input.")
+        }
+        writer.add(input)
+        guard writer.startWriting() else {
+            throw PresenterCameraRecorderError.unableToStart(writer.error?.localizedDescription ?? "The camera asset writer could not start.")
+        }
+
+        recordingQueue.sync {
+            self.assetWriter = writer
+            self.videoInput = input
+            self.didStartSession = false
+            self.didAppendFrame = false
+            self.isStopping = false
+            self.stopContinuation = nil
+            self.stopContinuationResumed = false
+        }
+
         session.startRunning()
-        movieOutput.startRecording(to: outputURL, recordingDelegate: self)
     }
 
     func stop() async throws {
-        guard movieOutput.isRecording else {
-            session.stopRunning()
+        try await withCheckedThrowingContinuation { continuation in
+            recordingQueue.async {
+                self.stopContinuation = continuation
+                self.stopContinuationResumed = false
+                self.isStopping = true
+                self.finishWriting()
+            }
+        }
+        session.stopRunning()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+        let fileSize = attributes[.size] as? NSNumber
+        guard fileSize?.int64Value ?? 0 > 0 else {
+            throw PresenterCameraRecorderError.unableToStart("The presenter camera output file was not created.")
+        }
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard !isStopping,
+              let assetWriter,
+              let videoInput,
+              assetWriter.status == .writing else { return }
+
+        if !didStartSession {
+            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            assetWriter.startSession(atSourceTime: presentationTime)
+            didStartSession = true
+        }
+
+        guard videoInput.isReadyForMoreMediaData else { return }
+        if videoInput.append(sampleBuffer) {
+            didAppendFrame = true
+        } else if let error = assetWriter.error {
+            finishWriting(error: error)
+        }
+    }
+
+    private func finishWriting(error: Error? = nil) {
+        guard !stopContinuationResumed else { return }
+        if let error {
+            assetWriter?.cancelWriting()
+            resumeStopContinuation(throwing: error)
             return
         }
 
-        try await withCheckedThrowingContinuation { continuation in
-            stopContinuation = continuation
-            movieOutput.stopRecording()
+        guard let assetWriter, let videoInput else {
+            resumeStopContinuation()
+            return
         }
-        session.stopRunning()
+
+        guard didAppendFrame else {
+            assetWriter.cancelWriting()
+            resumeStopContinuation(
+                throwing: PresenterCameraRecorderError.unableToStart("The presenter camera did not produce video frames.")
+            )
+            return
+        }
+
+        videoInput.markAsFinished()
+        assetWriter.finishWriting { [weak self, weak assetWriter] in
+            self?.recordingQueue.async {
+                if let error = assetWriter?.error {
+                    self?.resumeStopContinuation(throwing: error)
+                } else if assetWriter?.status == .completed {
+                    self?.resumeStopContinuation()
+                } else {
+                    self?.resumeStopContinuation(
+                        throwing: PresenterCameraRecorderError.unableToStart("The presenter camera writer did not complete.")
+                    )
+                }
+            }
+        }
     }
 
-    func fileOutput(
-        _ output: AVCaptureFileOutput,
-        didFinishRecordingTo outputFileURL: URL,
-        from connections: [AVCaptureConnection],
-        error: (any Error)?
-    ) {
-        if let error {
-            stopContinuation?.resume(throwing: error)
-        } else {
-            stopContinuation?.resume()
-        }
+    private func resumeStopContinuation(throwing error: Error? = nil) {
+        guard !stopContinuationResumed else { return }
+        stopContinuationResumed = true
+        let continuation = stopContinuation
         stopContinuation = nil
+        assetWriter = nil
+        videoInput = nil
+        if let error {
+            continuation?.resume(throwing: error)
+        } else {
+            continuation?.resume()
+        }
     }
 }

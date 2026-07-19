@@ -51,22 +51,164 @@ enum PresenterBubbleShape: String, CaseIterable, Codable {
     case roundedRect
 }
 
+enum PresenterSource: String, Codable, Equatable {
+    case camera
+    case avatarImage
+}
+
 struct PresenterBubbleStyle: Codable, Equatable {
     static let defaultValue = PresenterBubbleStyle(
         isEnabled: false,
-        position: .bottomRight,
+        normalizedCenter: PresenterBubbleStyle.defaultCenter(for: .bottomRight),
         normalizedSize: 0.22,
-        shape: .circle,
-        cornerRadius: 18,
-        shadowOpacity: 0.24
+        cornerRadiusRatio: 0.5,
+        shadowOpacity: 0.24,
+        source: .camera
     )
 
     let isEnabled: Bool
-    let position: PresenterBubblePosition
+    let normalizedCenter: NormalizedPoint
     let normalizedSize: Double
-    let shape: PresenterBubbleShape
-    let cornerRadius: Double
+    let cornerRadiusRatio: Double
     let shadowOpacity: Double
+    let source: PresenterSource
+
+    var position: PresenterBubblePosition {
+        let isLeft = normalizedCenter.x < 0.5
+        let isTop = normalizedCenter.y < 0.5
+        switch (isTop, isLeft) {
+        case (true, true):
+            return .topLeft
+        case (true, false):
+            return .topRight
+        case (false, true):
+            return .bottomLeft
+        case (false, false):
+            return .bottomRight
+        }
+    }
+
+    var shape: PresenterBubbleShape {
+        cornerRadiusRatio >= 0.49 ? .circle : .roundedRect
+    }
+
+    var cornerRadius: Double {
+        cornerRadiusRatio
+    }
+
+    init(
+        isEnabled: Bool,
+        normalizedCenter: NormalizedPoint,
+        normalizedSize: Double,
+        cornerRadiusRatio: Double,
+        shadowOpacity: Double,
+        source: PresenterSource = .camera
+    ) {
+        self.isEnabled = isEnabled
+        self.normalizedCenter = NormalizedPoint(
+            x: normalizedCenter.x.clamped(to: 0...1),
+            y: normalizedCenter.y.clamped(to: 0...1)
+        )
+        self.normalizedSize = normalizedSize.clamped(to: 0.08...0.5)
+        self.cornerRadiusRatio = cornerRadiusRatio.clamped(to: 0...0.5)
+        self.shadowOpacity = shadowOpacity.clamped(to: 0...1)
+        self.source = source
+    }
+
+    init(
+        isEnabled: Bool,
+        position: PresenterBubblePosition,
+        normalizedSize: Double,
+        shape: PresenterBubbleShape,
+        cornerRadius: Double,
+        shadowOpacity: Double,
+        source: PresenterSource = .camera
+    ) {
+        self.init(
+            isEnabled: isEnabled,
+            normalizedCenter: Self.defaultCenter(for: position),
+            normalizedSize: normalizedSize,
+            cornerRadiusRatio: shape == .circle ? 0.5 : Self.normalizedLegacyCornerRadius(cornerRadius),
+            shadowOpacity: shadowOpacity,
+            source: source
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case position
+        case normalizedCenter
+        case normalizedSize
+        case shape
+        case cornerRadius
+        case cornerRadiusRatio
+        case shadowOpacity
+        case source
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyPosition = try container.decodeIfPresent(
+            PresenterBubblePosition.self,
+            forKey: .position
+        ) ?? .bottomRight
+        let legacyShape = try container.decodeIfPresent(
+            PresenterBubbleShape.self,
+            forKey: .shape
+        ) ?? .circle
+        let legacyCornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? 18
+
+        let decodedCenter = try container.decodeIfPresent(NormalizedPoint.self, forKey: .normalizedCenter)
+            ?? Self.defaultCenter(for: legacyPosition)
+        let decodedCornerRatio: Double
+        if let ratio = try container.decodeIfPresent(Double.self, forKey: .cornerRadiusRatio) {
+            decodedCornerRatio = ratio
+        } else if legacyShape == .circle {
+            decodedCornerRatio = 0.5
+        } else {
+            decodedCornerRatio = Self.normalizedLegacyCornerRadius(legacyCornerRadius)
+        }
+
+        self.init(
+            isEnabled: try container.decode(Bool.self, forKey: .isEnabled),
+            normalizedCenter: decodedCenter,
+            normalizedSize: try container.decode(Double.self, forKey: .normalizedSize),
+            cornerRadiusRatio: decodedCornerRatio,
+            shadowOpacity: try container.decode(Double.self, forKey: .shadowOpacity),
+            source: try container.decodeIfPresent(PresenterSource.self, forKey: .source) ?? .camera
+        )
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(position, forKey: .position)
+        try container.encode(normalizedCenter, forKey: .normalizedCenter)
+        try container.encode(normalizedSize, forKey: .normalizedSize)
+        try container.encode(shape, forKey: .shape)
+        try container.encode(cornerRadius, forKey: .cornerRadius)
+        try container.encode(cornerRadiusRatio, forKey: .cornerRadiusRatio)
+        try container.encode(shadowOpacity, forKey: .shadowOpacity)
+        try container.encode(source, forKey: .source)
+    }
+
+    static func defaultCenter(for position: PresenterBubblePosition) -> NormalizedPoint {
+        switch position {
+        case .topLeft:
+            NormalizedPoint(x: 0, y: 0)
+        case .topRight:
+            NormalizedPoint(x: 1, y: 0)
+        case .bottomLeft:
+            NormalizedPoint(x: 0, y: 1)
+        case .bottomRight:
+            NormalizedPoint(x: 1, y: 1)
+        }
+    }
+
+    private static func normalizedLegacyCornerRadius(_ value: Double) -> Double {
+        let normalized = value > 1 ? value / 100 : value
+        return normalized.clamped(to: 0...0.5)
+    }
 }
 
 struct PresenterMedia: Codable, Equatable {
@@ -989,7 +1131,7 @@ final class ProjectStore {
 
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: sourceURL.path) else {
-            return media
+            return nil
         }
 
         let layout = layout(for: id)

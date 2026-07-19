@@ -54,7 +54,7 @@ final class EditorViewModel: ObservableObject {
     @Published private(set) var isPresenterBubbleEnabled = PresenterBubbleStyle.defaultValue.isEnabled
     @Published private(set) var presenterBubblePosition = PresenterBubbleStyle.defaultValue.position
     @Published private(set) var presenterBubbleSize = PresenterBubbleStyle.defaultValue.normalizedSize
-    @Published private(set) var presenterBubbleShape = PresenterBubbleStyle.defaultValue.shape
+    @Published private(set) var presenterBubbleCornerRadiusRatio = PresenterBubbleStyle.defaultValue.cornerRadiusRatio
 
     private let exportCoordinator: ExportCoordinator
     private let previewRenderer: any ProjectPreviewRendering
@@ -287,11 +287,11 @@ final class EditorViewModel: ObservableObject {
         updatePresenterBubbleStyle { style in
             PresenterBubbleStyle(
                 isEnabled: isEnabled,
-                position: style.position,
+                normalizedCenter: style.normalizedCenter,
                 normalizedSize: style.normalizedSize,
-                shape: style.shape,
-                cornerRadius: style.cornerRadius,
-                shadowOpacity: style.shadowOpacity
+                cornerRadiusRatio: style.cornerRadiusRatio,
+                shadowOpacity: style.shadowOpacity,
+                source: style.source
             )
         }
     }
@@ -300,11 +300,11 @@ final class EditorViewModel: ObservableObject {
         updatePresenterBubbleStyle { style in
             PresenterBubbleStyle(
                 isEnabled: style.isEnabled,
-                position: position,
+                normalizedCenter: PresenterBubbleStyle.defaultCenter(for: position),
                 normalizedSize: style.normalizedSize,
-                shape: style.shape,
-                cornerRadius: style.cornerRadius,
-                shadowOpacity: style.shadowOpacity
+                cornerRadiusRatio: style.cornerRadiusRatio,
+                shadowOpacity: style.shadowOpacity,
+                source: style.source
             )
         }
     }
@@ -313,24 +313,24 @@ final class EditorViewModel: ObservableObject {
         updatePresenterBubbleStyle { style in
             PresenterBubbleStyle(
                 isEnabled: style.isEnabled,
-                position: style.position,
+                normalizedCenter: style.normalizedCenter,
                 normalizedSize: size.clamped(to: 0.12...0.4),
-                shape: style.shape,
-                cornerRadius: style.cornerRadius,
-                shadowOpacity: style.shadowOpacity
+                cornerRadiusRatio: style.cornerRadiusRatio,
+                shadowOpacity: style.shadowOpacity,
+                source: style.source
             )
         }
     }
 
-    func updatePresenterBubbleShape(_ shape: PresenterBubbleShape) {
+    func updatePresenterBubbleCornerRadiusRatio(_ ratio: Double) {
         updatePresenterBubbleStyle { style in
             PresenterBubbleStyle(
                 isEnabled: style.isEnabled,
-                position: style.position,
+                normalizedCenter: style.normalizedCenter,
                 normalizedSize: style.normalizedSize,
-                shape: shape,
-                cornerRadius: style.cornerRadius,
-                shadowOpacity: style.shadowOpacity
+                cornerRadiusRatio: ratio.clamped(to: 0...0.5),
+                shadowOpacity: style.shadowOpacity,
+                source: style.source
             )
         }
     }
@@ -1224,7 +1224,7 @@ final class EditorViewModel: ObservableObject {
         isPresenterBubbleEnabled = style.isEnabled
         presenterBubblePosition = style.position
         presenterBubbleSize = style.normalizedSize
-        presenterBubbleShape = style.shape
+        presenterBubbleCornerRadiusRatio = style.cornerRadiusRatio
         isApplyingConfiguration = false
     }
 

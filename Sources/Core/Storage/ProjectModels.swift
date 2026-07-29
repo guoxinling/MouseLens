@@ -490,6 +490,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
     let manualZoomSegments: [ManualZoomSegment]
     let zoomTrackEdited: Bool
     let presenterMedia: PresenterMedia?
+    let captionTrack: CaptionTrack?
 
     var effectiveTrimRange: ProjectTrimRange {
         trimRange.clamped(to: duration)
@@ -533,7 +534,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         clipSegments: [ProjectTrimRange]? = nil,
         manualZoomSegments: [ManualZoomSegment] = [],
         zoomTrackEdited: Bool = false,
-        presenterMedia: PresenterMedia? = nil
+        presenterMedia: PresenterMedia? = nil,
+        captionTrack: CaptionTrack? = nil
     ) {
         let safeDuration = max(duration, 0)
         let safeTrimRange = (trimRange ?? ProjectTrimRange(start: 0, end: safeDuration)).clamped(to: safeDuration)
@@ -556,6 +558,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         self.manualZoomSegments = Self.normalizedManualZoomSegments(proposedZoomSegments, duration: safeDuration)
         self.zoomTrackEdited = zoomTrackEdited
         self.presenterMedia = presenterMedia
+        self.captionTrack = captionTrack
     }
 
     enum CodingKeys: String, CodingKey {
@@ -575,6 +578,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         case manualZoomSegments
         case zoomTrackEdited
         case presenterMedia
+        case captionTrack
     }
 
     init(from decoder: any Decoder) throws {
@@ -595,6 +599,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let manualZoomSegments = try container.decodeIfPresent([ManualZoomSegment].self, forKey: .manualZoomSegments) ?? []
         let zoomTrackEdited = try container.decodeIfPresent(Bool.self, forKey: .zoomTrackEdited) ?? false
         let presenterMedia = try container.decodeIfPresent(PresenterMedia.self, forKey: .presenterMedia)
+        let captionTrack = try container.decodeIfPresent(CaptionTrack.self, forKey: .captionTrack)
 
         self.init(
             id: id,
@@ -612,7 +617,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             clipSegments: clipSegments,
             manualZoomSegments: manualZoomSegments,
             zoomTrackEdited: zoomTrackEdited,
-            presenterMedia: presenterMedia
+            presenterMedia: presenterMedia,
+            captionTrack: captionTrack
         )
     }
 
@@ -634,6 +640,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         try container.encode(manualZoomSegments, forKey: .manualZoomSegments)
         try container.encode(zoomTrackEdited, forKey: .zoomTrackEdited)
         try container.encodeIfPresent(presenterMedia, forKey: .presenterMedia)
+        try container.encodeIfPresent(captionTrack, forKey: .captionTrack)
     }
 
     func updating(
@@ -644,7 +651,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         clipSegments: [ProjectTrimRange]? = nil,
         manualZoomSegments: [ManualZoomSegment]? = nil,
         zoomTrackEdited: Bool? = nil,
-        presenterMedia: PresenterMedia? = nil
+        presenterMedia: PresenterMedia? = nil,
+        captionTrack: CaptionTrack? = nil
     ) -> RecordingProject {
         let nextDuration = duration ?? self.duration
         let nextSegments = clipSegments ?? self.clipSegments
@@ -667,7 +675,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             clipSegments: normalizedSegments,
             manualZoomSegments: manualZoomSegments ?? self.manualZoomSegments,
             zoomTrackEdited: zoomTrackEdited ?? self.zoomTrackEdited,
-            presenterMedia: presenterMedia ?? self.presenterMedia
+            presenterMedia: presenterMedia ?? self.presenterMedia,
+            captionTrack: captionTrack ?? self.captionTrack
         )
     }
 

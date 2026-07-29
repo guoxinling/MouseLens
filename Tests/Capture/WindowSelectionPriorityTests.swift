@@ -1,6 +1,7 @@
 import XCTest
 @testable import MouseLens
 
+@MainActor
 final class WindowSelectionPriorityTests: XCTestCase {
     func testCurrentProcessWindowIsExcludedEvenWhenBundleIdentifierIsMissing() {
         XCTAssertTrue(

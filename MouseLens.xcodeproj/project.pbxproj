@@ -40,6 +40,7 @@
 		840987137B9ACEDFC5C4FD7D /* RenderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9292717184450E66935639A4 /* RenderModels.swift */; };
 		88AB85B0DF8F427240C69164 /* HomeViewModelWindowTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641047913EE520DF81D67DE0 /* HomeViewModelWindowTargetTests.swift */; };
 		8F6B2AA028ED7E72E99D6E46 /* AppPermissionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCEF9246922A9B09D56F35B2 /* AppPermissionsTests.swift */; };
+		90178D2D1585DF370707CF3E /* AppleSpeechTranscriptionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 079BB816EDA42F8801EC8992 /* AppleSpeechTranscriptionProvider.swift */; };
 		96ED929B728030B1D5C40781 /* BackgroundPresetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91F4D923B3870B9D570A95CE /* BackgroundPresetCatalog.swift */; };
 		99319774325DFF3FABF96797 /* ProjectStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */; };
 		9E77695417B3E40EC99974F6 /* TranscriptionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42FE40E83AFA13E61CFB3B6B /* TranscriptionProvider.swift */; };
@@ -76,6 +77,7 @@
 /* Begin PBXFileReference section */
 		035BE78B5BE8FB975F28F536 /* CameraPlanEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPlanEngineTests.swift; sourceTree = "<group>"; };
 		04ACE584B09B8D0461A21567 /* ExportPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportPanelView.swift; sourceTree = "<group>"; };
+		079BB816EDA42F8801EC8992 /* AppleSpeechTranscriptionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechTranscriptionProvider.swift; sourceTree = "<group>"; };
 		10D9FFAFE17E315029467454 /* MouseLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseLensApp.swift; sourceTree = "<group>"; };
 		1182832D4DFB818974F0A533 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorViewModel.swift; sourceTree = "<group>"; };
 		17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportConfigurationTests.swift; sourceTree = "<group>"; };
@@ -145,6 +147,7 @@
 		0550461CE36B7578C4488955 /* Captions */ = {
 			isa = PBXGroup;
 			children = (
+				079BB816EDA42F8801EC8992 /* AppleSpeechTranscriptionProvider.swift */,
 				37172F869EFD2A1ADC664E9E /* CaptionModels.swift */,
 				42FE40E83AFA13E61CFB3B6B /* TranscriptionProvider.swift */,
 			);
@@ -582,6 +585,7 @@
 				32F023939D47F1EBDA472F23 /* AppEnvironment.swift in Sources */,
 				0E47B72738E71892A474B032 /* AppPreferences.swift in Sources */,
 				54F353E4865D246A39709A94 /* AppTheme.swift in Sources */,
+				90178D2D1585DF370707CF3E /* AppleSpeechTranscriptionProvider.swift in Sources */,
 				96ED929B728030B1D5C40781 /* BackgroundPresetCatalog.swift in Sources */,
 				3CA72F3C5A844E26E0C63CAA /* BackgroundPreviewStyle.swift in Sources */,
 				A49E7E610B315156F9C5919A /* CameraPlanning.swift in Sources */,
@@ -657,6 +661,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses Apple Events to identify the current app window for Window recording.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MouseLens uses speech recognition to generate editable captions from your recordings.";
 				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -681,6 +686,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MouseLens uses Apple Events to identify the current app window for Window recording.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MouseLens can include microphone audio in recordings.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MouseLens uses speech recognition to generate editable captions from your recordings.";
 				INFOPLIST_KEY_NSSystemAdministrationUsageDescription = "MouseLens uses system permissions to record the screen and observe cursor activity.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

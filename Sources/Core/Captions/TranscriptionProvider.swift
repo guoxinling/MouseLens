@@ -43,6 +43,39 @@ protocol TranscriptionProvider {
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptResult
 }
 
+enum SpeechAuthorizationState: Equatable {
+    case notDetermined
+    case denied
+    case restricted
+    case authorized
+}
+
+protocol SpeechAuthorizationClient {
+    func authorizationStatus() -> SpeechAuthorizationState
+    func requestAuthorization() async -> SpeechAuthorizationState
+}
+
+struct RecognizedSpeechSegment: Equatable {
+    let start: TimeInterval
+    let duration: TimeInterval
+    let text: String
+
+    var end: TimeInterval {
+        start + max(duration, 0.12)
+    }
+}
+
+protocol SpeechRecognizerClient {
+    var localeIdentifier: String { get }
+    var isAvailable: Bool { get }
+    var supportsOnDeviceRecognition: Bool { get }
+
+    func recognizeFile(
+        at url: URL,
+        requiresOnDeviceRecognition: Bool
+    ) async throws -> [RecognizedSpeechSegment]
+}
+
 enum CaptionLocaleCatalog {
     static func supportedLocaleIdentifiers(
         systemLocaleIdentifier: String = Locale.current.identifier

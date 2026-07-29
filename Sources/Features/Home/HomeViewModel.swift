@@ -164,6 +164,12 @@ final class HomeViewModel: ObservableObject {
         refreshPermissions()
     }
 
+    func selectCaptureTarget(_ target: CaptureTarget) {
+        guard recordingState == .idle else { return }
+        guard selectedCaptureTarget != target else { return }
+        selectedCaptureTarget = target
+    }
+
     func startRecording() async {
         guard recordingState == .idle else { return }
 
@@ -648,8 +654,12 @@ final class HomeViewModel: ObservableObject {
     private func bindPreferences() {
         environment.preferencesStore.$defaultCaptureTarget
             .dropFirst()
-            .sink { [weak self] (_: CaptureTarget) in
+            .sink { [weak self] target in
                 guard let self, self.recordingState == .idle else { return }
+                guard Self.shouldApplyExternalCaptureTargetPreference(
+                    current: self.selectedCaptureTarget,
+                    preference: target
+                ) else { return }
                 self.applyPreferences()
             }
             .store(in: &cancellables)
@@ -761,6 +771,13 @@ final class HomeViewModel: ObservableObject {
         selectedWindowTargetID: UInt32?
     ) -> WindowTargetSelectionPolicy {
         .preferCurrentWindow
+    }
+
+    static func shouldApplyExternalCaptureTargetPreference(
+        current: CaptureTarget,
+        preference: CaptureTarget
+    ) -> Bool {
+        current != preference
     }
 
     private func normalize(events: [PointerEvent], for session: CaptureSession) -> [PointerEvent] {

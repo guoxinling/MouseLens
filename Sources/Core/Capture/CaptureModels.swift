@@ -68,6 +68,15 @@ struct CaptureCoordinateSpace: Codable, Equatable {
     let screenBounds: CaptureViewport
 }
 
+struct CaptureWindowDiagnostics: Codable, Equatable {
+    let windowFrame: CaptureViewport
+    let appKitWindowFrame: CaptureViewport
+    let adjustedViewport: CaptureViewport
+    let filterContentRect: CaptureViewport
+    let pointPixelScale: Double
+    let bundleIdentifier: String?
+}
+
 struct CaptureWindowOption: Identifiable, Equatable {
     let id: UInt32
     let appName: String
@@ -121,9 +130,36 @@ struct CaptureSession: Equatable, Codable {
     let endedAt: Date
     let rawCaptureURL: URL?
     let coordinateSpace: CaptureCoordinateSpace?
+    let sourceFrameSize: CGSize?
+    let sourceVisibleRect: CaptureViewport?
+    let windowDiagnostics: CaptureWindowDiagnostics?
 
     var duration: TimeInterval {
         endedAt.timeIntervalSince(mediaStartedAt ?? startedAt)
+    }
+
+    init(
+        id: UUID,
+        configuration: ScreenRecorderConfiguration,
+        startedAt: Date,
+        mediaStartedAt: Date?,
+        endedAt: Date,
+        rawCaptureURL: URL?,
+        coordinateSpace: CaptureCoordinateSpace?,
+        sourceFrameSize: CGSize? = nil,
+        sourceVisibleRect: CaptureViewport? = nil,
+        windowDiagnostics: CaptureWindowDiagnostics? = nil
+    ) {
+        self.id = id
+        self.configuration = configuration
+        self.startedAt = startedAt
+        self.mediaStartedAt = mediaStartedAt
+        self.endedAt = endedAt
+        self.rawCaptureURL = rawCaptureURL
+        self.coordinateSpace = coordinateSpace
+        self.sourceFrameSize = sourceFrameSize
+        self.sourceVisibleRect = sourceVisibleRect
+        self.windowDiagnostics = windowDiagnostics
     }
 }
 
@@ -139,6 +175,176 @@ enum CaptureSizePolicy {
         guard currentMax > maxDimension else { return rawSize }
         let scale = maxDimension / currentMax
         return CGSize(width: rawSize.width * scale, height: rawSize.height * scale)
+    }
+
+    static func recommendedWindowCaptureSize(
+        windowFrame: CGRect,
+        filterContentRect: CGRect,
+        pointPixelScale: CGFloat
+    ) -> CGSize {
+        let contentRect = filterContentRect.width > 0 && filterContentRect.height > 0
+            ? filterContentRect
+            : windowFrame
+        return recommendedCaptureSize(contentRect: contentRect, pointPixelScale: pointPixelScale)
+    }
+
+    static func recordingFrameTransform(sourceExtent: CGRect, destinationSize: CGSize) -> CGAffineTransform {
+        guard sourceExtent.width > 0,
+              sourceExtent.height > 0,
+              destinationSize.width > 0,
+              destinationSize.height > 0 else {
+            return .identity
+        }
+
+        let scaleX = destinationSize.width / sourceExtent.width
+        let scaleY = destinationSize.height / sourceExtent.height
+        return CGAffineTransform(
+            a: scaleX,
+            b: 0,
+            c: 0,
+            d: scaleY,
+            tx: -sourceExtent.minX * scaleX,
+            ty: -sourceExtent.minY * scaleY
+        )
+    }
+
+    static func adjustedWindowViewportForFullscreenBrowserCapture(
+        _ viewport: CGRect,
+        screenBounds: CGRect,
+        bundleIdentifier: String?
+    ) -> CGRect {
+        guard isBrowserBundleIdentifier(bundleIdentifier) else { return viewport }
+        guard screenBounds.width > 0, screenBounds.height > 0 else { return viewport }
+        guard viewport.width >= screenBounds.width * 0.70,
+              viewport.height >= screenBounds.height * 0.70 else {
+            return viewport
+        }
+
+        let topGap = screenBounds.maxY - viewport.maxY
+        guard viewport.minY > screenBounds.minY + 8, topGap > 8, topGap <= 180 else { return viewport }
+
+        return CGRect(
+            x: viewport.minX,
+            y: viewport.minY + topGap,
+            width: viewport.width,
+            height: viewport.height
+        )
+    }
+
+    static func pointerViewportForWindowCapture(
+        appKitViewport: CGRect,
+        filterContentRect: CGRect,
+        screenBounds: CGRect,
+        bundleIdentifier: String?
+    ) -> CGRect {
+        guard isBrowserBundleIdentifier(bundleIdentifier) else { return appKitViewport }
+        guard screenBounds.width > 0, screenBounds.height > 0 else { return appKitViewport }
+        guard appKitViewport.width >= screenBounds.width * 0.70,
+              appKitViewport.height >= screenBounds.height * 0.70 else {
+            return appKitViewport
+        }
+        guard filterContentRect.width > 0,
+              filterContentRect.height > 0,
+              abs(filterContentRect.width - appKitViewport.width) <= 2,
+              abs(filterContentRect.height - appKitViewport.height) <= 2 else {
+            return appKitViewport
+        }
+        guard filterContentRect.minY > screenBounds.minY + 8,
+              filterContentRect.minY <= 180,
+              abs(appKitViewport.minY - screenBounds.minY) <= 2 else {
+            return appKitViewport
+        }
+
+        return CGRect(
+            x: appKitViewport.minX,
+            y: screenBounds.minY,
+            width: appKitViewport.width,
+            height: screenBounds.height
+        )
+    }
+
+    static func adjustedCoordinateSpaceForVisibleWindowSource(
+        _ coordinateSpace: CaptureCoordinateSpace,
+        sourceSize: CGSize,
+        visibleSourceRect: CGRect
+    ) -> CaptureCoordinateSpace {
+        // Pointer events are recorded in the real AppKit window viewport.
+        // A detected visible source rect only describes which video pixels are
+        // usable after ScreenCaptureKit/browser fullscreen matte is removed; it
+        // must not shrink the pointer coordinate domain.
+        _ = sourceSize
+        _ = visibleSourceRect
+        return coordinateSpace
+    }
+
+    static func isBrowserBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        let knownBrowserPrefixes = [
+            "com.google.Chrome",
+            "com.apple.Safari",
+            "com.microsoft.edgemac",
+            "company.thebrowser.Browser",
+            "com.brave.Browser",
+            "org.mozilla.firefox"
+        ]
+        return knownBrowserPrefixes.contains { bundleIdentifier == $0 || bundleIdentifier.hasPrefix("\($0).") }
+    }
+
+    static func detectedRightBlackMatteSourceRect(
+        in pixelBuffer: CVPixelBuffer,
+        minimumWidthRatio: CGFloat = 0.025,
+        maximumWidthRatio: CGFloat = 0.35
+    ) -> CGRect {
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let fullRect = CGRect(x: 0, y: 0, width: width, height: height)
+        guard width > 0, height > 0 else { return fullRect }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return fullRect }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+        let rowStride = max(1, height / 96)
+
+        func darkRatio(atColumn x: Int) -> Double {
+            var darkSamples = 0
+            var totalSamples = 0
+
+            for y in stride(from: 0, to: height, by: rowStride) {
+                let offset = (y * bytesPerRow) + (x * 4)
+                let blue = bytes[offset]
+                let green = bytes[offset + 1]
+                let red = bytes[offset + 2]
+                if red < 8, green < 8, blue < 8 {
+                    darkSamples += 1
+                }
+                totalSamples += 1
+            }
+
+            guard totalSamples > 0 else { return 0 }
+            return Double(darkSamples) / Double(totalSamples)
+        }
+
+        var blackWidth = 0
+        for x in stride(from: width - 1, through: 0, by: -1) {
+            guard darkRatio(atColumn: x) >= 0.98 else { break }
+            blackWidth += 1
+        }
+
+        let minimumWidth = max(24, Int(CGFloat(width) * minimumWidthRatio))
+        let maximumWidth = Int(CGFloat(width) * maximumWidthRatio)
+        guard blackWidth >= minimumWidth, blackWidth <= maximumWidth else {
+            return fullRect
+        }
+
+        let interiorProbeX = max(0, width - blackWidth - 80)
+        guard darkRatio(atColumn: interiorProbeX) < 0.75 else {
+            return fullRect
+        }
+
+        return CGRect(x: 0, y: 0, width: width - blackWidth, height: height)
     }
 }
 
@@ -175,12 +381,14 @@ private struct CaptureSource {
     let filter: SCContentFilter
     let viewport: CaptureViewport
     let captureSize: CGSize
+    let windowDiagnostics: CaptureWindowDiagnostics?
 }
 
 @available(macOS 15.0, *)
 private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private let logger: Logger
     private let outputURL: URL
+    private let configuration: ScreenRecorderConfiguration
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
     private let videoAdaptor: AVAssetWriterInputPixelBufferAdaptor
@@ -201,6 +409,8 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
     private var lastVideoPresentationTime: CMTime?
     private var lastAudioPresentationTimes: [ObjectIdentifier: CMTime] = [:]
     private var firstVideoFrameDate: Date?
+    private var sourceFrameSize: CGSize?
+    private var visibleSourceRect: CGRect?
 
     init(
         outputURL: URL,
@@ -210,6 +420,7 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
     ) throws {
         self.logger = logger
         self.outputURL = outputURL
+        self.configuration = configuration
 
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: outputURL.path) {
@@ -345,6 +556,18 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
         await withCheckedContinuation { continuation in
             sampleHandlerQueue.async { [self] in
                 continuation.resume(returning: firstVideoFrameDate)
+            }
+        }
+    }
+
+    func detectedVisibleSourceRect() async -> (sourceSize: CGSize, visibleRect: CGRect)? {
+        await withCheckedContinuation { continuation in
+            sampleHandlerQueue.async { [self] in
+                guard let sourceFrameSize, let visibleSourceRect else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: (sourceFrameSize, visibleSourceRect))
             }
         }
     }
@@ -574,8 +797,47 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
             height: CVPixelBufferGetHeight(copiedPixelBuffer)
         )
         let sourceImage = CIImage(cvPixelBuffer: sourcePixelBuffer)
-        ciContext.render(sourceImage, to: copiedPixelBuffer, bounds: renderBounds, colorSpace: renderColorSpace)
+        _ = recordingSourceRect(for: sourcePixelBuffer, fallbackExtent: sourceImage.extent)
+        let transform = CaptureSizePolicy.recordingFrameTransform(
+            sourceExtent: sourceImage.extent,
+            destinationSize: renderBounds.size
+        )
+        let scaledImage = sourceImage
+            .transformed(by: transform)
+            .cropped(to: renderBounds)
+        let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+            .cropped(to: renderBounds)
+        let outputImage = scaledImage.composited(over: background)
+        ciContext.render(outputImage, to: copiedPixelBuffer, bounds: renderBounds, colorSpace: renderColorSpace)
         return copiedPixelBuffer
+    }
+
+    private func recordingSourceRect(for sourcePixelBuffer: CVPixelBuffer, fallbackExtent: CGRect) -> CGRect {
+        if let visibleSourceRect {
+            return visibleSourceRect
+        }
+
+        let sourceSize = CGSize(
+            width: CVPixelBufferGetWidth(sourcePixelBuffer),
+            height: CVPixelBufferGetHeight(sourcePixelBuffer)
+        )
+        sourceFrameSize = sourceSize
+
+        guard configuration.target == .window else {
+            visibleSourceRect = fallbackExtent
+            return fallbackExtent
+        }
+
+        let detectedRect = CaptureSizePolicy.detectedRightBlackMatteSourceRect(in: sourcePixelBuffer)
+        visibleSourceRect = detectedRect
+
+        if detectedRect != fallbackExtent {
+            logger.log(
+                "Window capture source matte detected. Using visible source rect \(String(format: "%.0f", detectedRect.width))x\(String(format: "%.0f", detectedRect.height)) from \(String(format: "%.0f", fallbackExtent.width))x\(String(format: "%.0f", fallbackExtent.height))."
+            )
+        }
+
+        return detectedRect
     }
 }
 
@@ -586,6 +848,7 @@ private struct ActiveRecording {
     let startedAt: Date
     let rawCaptureURL: URL
     let coordinateSpace: CaptureCoordinateSpace
+    let windowDiagnostics: CaptureWindowDiagnostics?
     let stream: SCStream
     let fileRecorder: StreamFileRecorder
 }
@@ -712,6 +975,7 @@ final class ScreenRecorder {
             startedAt: startDate,
             rawCaptureURL: scratchURL,
             coordinateSpace: coordinateSpace,
+            windowDiagnostics: captureSource.windowDiagnostics,
             stream: stream,
             fileRecorder: fileRecorder
         )
@@ -725,7 +989,10 @@ final class ScreenRecorder {
             mediaStartedAt: nil,
             endedAt: startDate,
             rawCaptureURL: scratchURL,
-            coordinateSpace: coordinateSpace
+            coordinateSpace: coordinateSpace,
+            sourceFrameSize: nil,
+            sourceVisibleRect: nil,
+            windowDiagnostics: captureSource.windowDiagnostics
         )
     }
 
@@ -743,6 +1010,23 @@ final class ScreenRecorder {
         try await stopCapture(stream: activeRecording.stream)
         try await activeRecording.fileRecorder.finish()
         let mediaStartedAt = await activeRecording.fileRecorder.firstVideoFrameWallClockDate()
+        let sourceVisibleRect: CaptureViewport?
+        let sourceFrameSize: CGSize?
+        let coordinateSpace: CaptureCoordinateSpace
+        if activeRecording.configuration.target == .window,
+           let sourceVisibility = await activeRecording.fileRecorder.detectedVisibleSourceRect() {
+            sourceFrameSize = sourceVisibility.sourceSize
+            sourceVisibleRect = CaptureViewport(rect: sourceVisibility.visibleRect)
+            coordinateSpace = CaptureSizePolicy.adjustedCoordinateSpaceForVisibleWindowSource(
+                activeRecording.coordinateSpace,
+                sourceSize: sourceVisibility.sourceSize,
+                visibleSourceRect: sourceVisibility.visibleRect
+            )
+        } else {
+            sourceFrameSize = nil
+            sourceVisibleRect = nil
+            coordinateSpace = activeRecording.coordinateSpace
+        }
 
         let session = CaptureSession(
             id: activeRecording.sessionID,
@@ -751,7 +1035,10 @@ final class ScreenRecorder {
             mediaStartedAt: mediaStartedAt,
             endedAt: Date(),
             rawCaptureURL: activeRecording.rawCaptureURL,
-            coordinateSpace: activeRecording.coordinateSpace
+            coordinateSpace: coordinateSpace,
+            sourceFrameSize: sourceFrameSize,
+            sourceVisibleRect: sourceVisibleRect,
+            windowDiagnostics: activeRecording.windowDiagnostics
         )
 
         logger.log("Stopped live capture after \(String(format: "%.2f", session.duration)) seconds.")
@@ -792,7 +1079,6 @@ final class ScreenRecorder {
         // actually apply.
         if request.target == .window {
             configuration.ignoreShadowsSingleWindow = true
-            configuration.ignoreGlobalClipSingleWindow = true
             if #available(macOS 14.2, *) {
                 configuration.includeChildWindows = true
             }
@@ -856,7 +1142,8 @@ final class ScreenRecorder {
         return CaptureSource(
             filter: filter,
             viewport: CaptureViewport(rect: filter.contentRect),
-            captureSize: Self.recommendedCaptureSize(for: filter)
+            captureSize: Self.recommendedCaptureSize(for: filter),
+            windowDiagnostics: nil
         )
     }
 
@@ -900,17 +1187,40 @@ final class ScreenRecorder {
 
     private func makeWindowCaptureSource(for window: SCWindow, screenBounds: CGRect) -> CaptureSource {
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        let appKitViewport = Self.appKitViewport(
+        let filterContentRect = filter.contentRect
+        let pointPixelScale = CGFloat(filter.pointPixelScale)
+        let windowViewport = Self.appKitViewport(
             fromScreenCaptureKitRect: window.frame,
             screenBounds: screenBounds
         )
+        let appKitViewport = Self.adjustedWindowViewportForFullscreenBrowserCapture(
+            windowViewport,
+            screenBounds: screenBounds,
+            bundleIdentifier: window.owningApplication?.bundleIdentifier
+        )
+        let pointerViewport = CaptureSizePolicy.pointerViewportForWindowCapture(
+            appKitViewport: appKitViewport,
+            filterContentRect: filterContentRect,
+            screenBounds: screenBounds,
+            bundleIdentifier: window.owningApplication?.bundleIdentifier
+        )
+        let diagnostics = CaptureWindowDiagnostics(
+            windowFrame: CaptureViewport(rect: window.frame),
+            appKitWindowFrame: CaptureViewport(rect: windowViewport),
+            adjustedViewport: CaptureViewport(rect: pointerViewport),
+            filterContentRect: CaptureViewport(rect: filterContentRect),
+            pointPixelScale: Double(pointPixelScale),
+            bundleIdentifier: window.owningApplication?.bundleIdentifier
+        )
         return CaptureSource(
             filter: filter,
-            viewport: CaptureViewport(rect: appKitViewport),
-            captureSize: Self.recommendedCaptureSize(
-                contentRect: window.frame,
-                pointPixelScale: CGFloat(filter.pointPixelScale)
-            )
+            viewport: CaptureViewport(rect: pointerViewport),
+            captureSize: CaptureSizePolicy.recommendedWindowCaptureSize(
+                windowFrame: window.frame,
+                filterContentRect: filterContentRect,
+                pointPixelScale: pointPixelScale
+            ),
+            windowDiagnostics: diagnostics
         )
     }
 
@@ -937,6 +1247,7 @@ final class ScreenRecorder {
     private func isSelectableWindow(_ window: SCWindow, metadata: OnScreenWindowMetadata?) -> Bool {
         guard window.isOnScreen else { return false }
         guard window.frame.width > 120, window.frame.height > 80 else { return false }
+        guard !Self.isLikelyAuxiliaryWindowFrame(window.frame) else { return false }
         guard !Self.isWindowOwnedByCurrentApp(
             bundleIdentifier: window.owningApplication?.bundleIdentifier,
             processID: window.owningApplication?.processID ?? metadata?.ownerProcessID,
@@ -945,6 +1256,12 @@ final class ScreenRecorder {
         guard window.owningApplication?.bundleIdentifier != "com.apple.dock" else { return false }
         guard window.windowLayer >= 0, window.windowLayer <= 20 else { return false }
         return true
+    }
+
+    static func isLikelyAuxiliaryWindowFrame(_ frame: CGRect) -> Bool {
+        guard frame.width > 0, frame.height > 0 else { return true }
+        let aspectRatio = frame.width / frame.height
+        return frame.height < 260 && aspectRatio > 6
     }
 
     static func isWindowOwnedByCurrentApp(
@@ -1054,6 +1371,22 @@ final class ScreenRecorder {
             width: rect.width,
             height: rect.height
         )
+    }
+
+    static func adjustedWindowViewportForFullscreenBrowserCapture(
+        _ viewport: CGRect,
+        screenBounds: CGRect,
+        bundleIdentifier: String?
+    ) -> CGRect {
+        CaptureSizePolicy.adjustedWindowViewportForFullscreenBrowserCapture(
+            viewport,
+            screenBounds: screenBounds,
+            bundleIdentifier: bundleIdentifier
+        )
+    }
+
+    static func isBrowserBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        CaptureSizePolicy.isBrowserBundleIdentifier(bundleIdentifier)
     }
 
     @available(macOS 15.0, *)

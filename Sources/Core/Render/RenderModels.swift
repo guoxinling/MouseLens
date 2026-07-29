@@ -177,7 +177,7 @@ struct ExportConfiguration: Equatable {
         case .mp4:
             ExportConfiguration(
                 format: .mp4,
-                resolution: .p1080,
+                resolution: .p2160,
                 frameRate: .fps30,
                 quality: .high,
                 includesCursor: true,
@@ -186,7 +186,7 @@ struct ExportConfiguration: Equatable {
         case .gif:
             ExportConfiguration(
                 format: .gif,
-                resolution: .p720,
+                resolution: .p1080,
                 frameRate: .fps15,
                 quality: .balanced,
                 includesCursor: true,
@@ -523,6 +523,34 @@ enum CursorGeometry {
             x: tip.x - (coreImageHotspot.x * scale),
             y: tip.y - (coreImageHotspot.y * scale)
         )
+    }
+}
+
+enum CursorVisualCalibrationPolicy {
+    private static let fullscreenBrowserWindowYOffset: CGFloat = -3
+
+    static func offset(captureTarget: CaptureTarget, sourceSize: CGSize, sourceExtent: CGRect) -> CGSize {
+        guard captureTarget == .window else { return .zero }
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return .zero }
+        guard sourceExtent.width > 0, sourceExtent.height > 0 else { return .zero }
+
+        let widthGap = sourceSize.width - sourceExtent.width
+        guard widthGap >= 80,
+              abs(sourceSize.height - sourceExtent.height) <= 2 else {
+            return .zero
+        }
+
+        return CGSize(width: 0, height: fullscreenBrowserWindowYOffset)
+    }
+
+    static func calibratedPoint(
+        _ point: CGPoint,
+        captureTarget: CaptureTarget,
+        sourceSize: CGSize,
+        sourceExtent: CGRect
+    ) -> CGPoint {
+        let offset = offset(captureTarget: captureTarget, sourceSize: sourceSize, sourceExtent: sourceExtent)
+        return CGPoint(x: point.x + offset.width, y: point.y + offset.height)
     }
 }
 
@@ -894,8 +922,12 @@ struct SourceCropPlanner {
         let centerX = sourceExtent.minX + (snapshot.focus.x * sourceExtent.width)
         let centerY = sourceExtent.maxY - (snapshot.focus.y * sourceExtent.height)
 
-        let originX = centerX - (cropWidth / 2)
-        let originY = centerY - (cropHeight / 2)
+        let originX = (centerX - (cropWidth / 2)).clamped(
+            to: sourceExtent.minX...(sourceExtent.maxX - cropWidth)
+        )
+        let originY = (centerY - (cropHeight / 2)).clamped(
+            to: sourceExtent.minY...(sourceExtent.maxY - cropHeight)
+        )
 
         return CGRect(x: originX, y: originY, width: cropWidth, height: cropHeight)
     }
@@ -967,7 +999,7 @@ struct SourceCropPlanner {
 
 enum SourcePresentationPolicy {
     static func preservesFullSourceAtBase(captureTarget: CaptureTarget, padding: Double) -> Bool {
-        captureTarget == .window && padding > 0.0001
+        padding > 0.0001
     }
 }
 
@@ -1990,8 +2022,9 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         includesCursor: Bool = true,
         includesClickFeedback: Bool = true
     ) -> CIImage {
+        let effectiveSourceExtent = project.effectiveSourceExtent(for: sourceImage.extent)
         let presentation = cropPlanner.presentation(
-            for: sourceImage.extent,
+            for: effectiveSourceExtent,
             contentRect: preparedAssets.layout.contentRect,
             snapshot: snapshot,
             preservesFullSourceAtBase: SourcePresentationPolicy.preservesFullSourceAtBase(
@@ -2043,7 +2076,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             reconstructsCursor: project.reconstructsCursor,
             includesClickFeedback: includesClickFeedback,
             layout: preparedAssets.layout,
-            sourceExtent: sourceImage.extent,
+            sourceExtent: effectiveSourceExtent,
             cropRect: cropRect,
             displayRect: displayRect
         )
@@ -2055,9 +2088,11 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             includesCursor: includesCursor,
             includesClickFeedback: includesClickFeedback,
             layout: preparedAssets.layout,
-            sourceExtent: sourceImage.extent,
+            sourceExtent: effectiveSourceExtent,
             cropRect: cropRect,
-            displayRect: displayRect
+            displayRect: displayRect,
+            captureTarget: project.captureTarget,
+            sourceSize: sourceImage.extent.size
         )
 
         return withCursor.composited(over: preparedAssets.backgroundImage)
@@ -2379,27 +2414,41 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         layout: RenderLayout,
         sourceExtent: CGRect,
         cropRect: CGRect,
-        displayRect: CGRect
+        displayRect: CGRect,
+        captureTarget: CaptureTarget,
+        sourceSize: CGSize
     ) -> CIImage {
         guard reconstructsCursor, let pointerSnapshot else { return image }
 
-        let point = cropPlanner.mappedContentPoint(
+        let mappedPoint = cropPlanner.mappedContentPoint(
             for: pointerSnapshot.location,
             in: sourceExtent,
             cropRect: cropRect,
             layout: layout,
             displayRect: displayRect
         )
+        let point = CursorVisualCalibrationPolicy.calibratedPoint(
+            mappedPoint,
+            captureTarget: captureTarget,
+            sourceSize: sourceSize,
+            sourceExtent: sourceExtent
+        )
         let ciPoint = coreImagePoint(fromTopOriginPoint: point, in: layout.fullRect)
 
         var layeredImage = image
         if includesClickFeedback, pointerSnapshot.isClickActive, let clickLocation = pointerSnapshot.clickLocation {
-            let clickPoint = cropPlanner.mappedContentPoint(
+            let mappedClickPoint = cropPlanner.mappedContentPoint(
                 for: clickLocation,
                 in: sourceExtent,
                 cropRect: cropRect,
                 layout: layout,
                 displayRect: displayRect
+            )
+            let clickPoint = CursorVisualCalibrationPolicy.calibratedPoint(
+                mappedClickPoint,
+                captureTarget: captureTarget,
+                sourceSize: sourceSize,
+                sourceExtent: sourceExtent
             )
             let intensity = (0.45 + (pointerSnapshot.clickProgress * 0.55)).clamped(to: 0.45...1.0)
             layeredImage = applyClickRipple(
@@ -2789,10 +2838,15 @@ final class ExportCoordinator {
 
     static func exportFilename(for project: RecordingProject, configuration: ExportConfiguration) -> String {
         let formatExtension = configuration.format.fileExtension
-        return "\(exportFilenameStem(for: project))-\(configuration.format.rawValue)-\(configuration.resolution.rawValue).\(formatExtension)"
+        let descriptor = exportDescriptor(for: configuration)
+        return "MouseLens_\(descriptor)_\(exportDateStamp(for: project)).\(formatExtension)"
     }
 
     private static func exportFilenameStem(for project: RecordingProject) -> String {
+        "MouseLens_\(exportDateStamp(for: project))"
+    }
+
+    private static func exportDateStamp(for project: RecordingProject) -> String {
         let stamp = project.createdAt.formatted(
             .dateTime
                 .year()
@@ -2805,7 +2859,31 @@ final class ExportCoordinator {
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .replacingOccurrences(of: " ", with: "_")
-        return "\(project.name.filenameSlug)-\(normalizedStamp)"
+            .replacingOccurrences(of: ",", with: "")
+        return normalizedStamp
+    }
+
+    private static func exportDescriptor(for configuration: ExportConfiguration) -> String {
+        let resolutionLabel = configuration.resolution.exportFilenameLabel
+        let frameRateLabel = "\(configuration.frameRate.rawValue)fps"
+
+        switch configuration.format {
+        case .mp4:
+            return "\(resolutionLabel)_\(frameRateLabel)"
+        case .gif:
+            return "GIF_\(resolutionLabel)_\(frameRateLabel)"
+        }
+    }
+}
+
+private extension ExportResolution {
+    var exportFilenameLabel: String {
+        switch self {
+        case .p2160:
+            "4K"
+        default:
+            label
+        }
     }
 }
 

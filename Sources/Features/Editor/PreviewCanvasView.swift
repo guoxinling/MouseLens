@@ -63,6 +63,19 @@ struct PreviewFooterMetadataPolicy {
     }
 }
 
+struct PreviewStageBackgroundPolicy {
+    static let constrainsBackgroundToStageBounds = true
+    static let centersStageInPreviewCard = true
+
+    static func drawsOuterBackground(usesLiveStylePlayback: Bool) -> Bool {
+        !usesLiveStylePlayback
+    }
+}
+
+struct PresenterPlaybackMirrorPolicy {
+    static let videoLayerTransform = CATransform3DMakeScale(-1, 1, 1)
+}
+
 struct PreviewKeyboardShortcutPolicy {
     static let spaceKeyCode: UInt16 = 49
 
@@ -75,6 +88,10 @@ struct PreviewKeyboardShortcutPolicy {
         guard activeModifiers.isEmpty else { return false }
         return keyCode == spaceKeyCode || charactersIgnoringModifiers == " "
     }
+}
+
+struct PreviewVideoGravityPolicy {
+    static let playerVideoGravity: AVLayerVideoGravity = .resize
 }
 
 struct PreviewCanvasView: View {
@@ -102,7 +119,7 @@ struct PreviewCanvasView: View {
     @State private var scrubbedPlaybackTime: TimeInterval = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .center, spacing: 0) {
             previewStage
 
             previewControls
@@ -225,8 +242,10 @@ struct PreviewCanvasView: View {
         let showsLoadingOverlay = shouldShowLoadingOverlay
 
         return ZStack {
-            BackgroundPreviewFill(preset: project.style.backgroundPreset)
-                .opacity(0.88)
+            if PreviewStageBackgroundPolicy.drawsOuterBackground(usesLiveStylePlayback: usesLiveStylePlayback) {
+                BackgroundPreviewFill(preset: project.style.backgroundPreset)
+                    .opacity(0.88)
+            }
 
             if usesLiveStylePlayback, let activePlaybackURL {
                 liveStylePlaybackStage(url: activePlaybackURL)
@@ -314,8 +333,10 @@ struct PreviewCanvasView: View {
             let pointerSnapshot = PointerTimeline().snapshot(at: sourceTimestamp, from: project.events, smoothing: .raw)
             let previewGeometry = RealtimePreviewGeometry(
                 sourceSize: sourceSize,
+                sourceVisibleRect: project.effectiveSourceExtent(for: CGRect(origin: .zero, size: sourceSize)),
                 contentRect: contentRect,
                 snapshot: frameSnapshot,
+                captureTarget: project.captureTarget,
                 preservesFullSourceAtBase: SourcePresentationPolicy.preservesFullSourceAtBase(
                     captureTarget: project.captureTarget,
                     padding: project.style.padding
@@ -331,6 +352,8 @@ struct PreviewCanvasView: View {
 
             ZStack {
                 BackgroundPreviewFill(preset: project.style.backgroundPreset)
+                    .frame(width: stageSize.width, height: stageSize.height)
+                    .clipped()
 
                 ZStack(alignment: .topLeading) {
                     PreviewVideoPlayerView(
@@ -387,6 +410,8 @@ struct PreviewCanvasView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .frame(width: stageSize.width, height: stageSize.height)
+            .clipped()
         }
     }
 
@@ -604,15 +629,19 @@ private struct ManualZoomFocusOverlay: View {
 
 struct RealtimePreviewGeometry {
     let sourceSize: CGSize
+    let sourceExtent: CGRect
     let contentRect: CGRect
     let cropRect: CGRect
     let displayRect: CGRect
     let videoFrame: CGRect
+    let cursorVisualOffset: CGSize
 
     init(
         sourceSize: CGSize,
+        sourceVisibleRect: CGRect? = nil,
         contentRect: CGRect,
         snapshot: FrameSnapshot,
+        captureTarget: CaptureTarget = .screen,
         preservesFullSourceAtBase: Bool = false,
         cropPlanner: SourceCropPlanner = SourceCropPlanner()
     ) {
@@ -626,7 +655,16 @@ struct RealtimePreviewGeometry {
             width: max(contentRect.width, 1),
             height: max(contentRect.height, 1)
         )
-        let sourceExtent = CGRect(origin: .zero, size: safeSourceSize)
+        let fullSourceExtent = CGRect(origin: .zero, size: safeSourceSize)
+        let sourceExtent: CGRect
+        if let sourceVisibleRect,
+           sourceVisibleRect.width > 0,
+           sourceVisibleRect.height > 0,
+           fullSourceExtent.contains(sourceVisibleRect) {
+            sourceExtent = sourceVisibleRect
+        } else {
+            sourceExtent = fullSourceExtent
+        }
         let presentation = cropPlanner.presentation(
             for: sourceExtent,
             contentRect: safeContentRect,
@@ -647,20 +685,31 @@ struct RealtimePreviewGeometry {
         )
 
         self.sourceSize = safeSourceSize
+        self.sourceExtent = sourceExtent
         self.contentRect = safeContentRect
         self.cropRect = cropRect
         self.displayRect = displayRect
         self.videoFrame = CGRect(origin: frameOrigin, size: frameSize)
+        self.cursorVisualOffset = CursorVisualCalibrationPolicy.offset(
+            captureTarget: captureTarget,
+            sourceSize: safeSourceSize,
+            sourceExtent: sourceExtent
+        )
     }
 
     func contentPoint(for normalizedPoint: NormalizedPoint) -> CGPoint {
         SourceCropPlanner().mappedContentPoint(
             for: normalizedPoint,
-            in: CGRect(origin: .zero, size: sourceSize),
+            in: sourceExtent,
             cropRect: cropRect,
             layout: RenderLayout(renderSize: contentRect.size, padding: 0),
             displayRect: displayRect
         )
+    }
+
+    func cursorContentPoint(for normalizedPoint: NormalizedPoint) -> CGPoint {
+        let point = contentPoint(for: normalizedPoint)
+        return CGPoint(x: point.x + cursorVisualOffset.width, y: point.y + cursorVisualOffset.height)
     }
 }
 
@@ -956,7 +1005,7 @@ private final class StablePlayerContainerView: NSView {
         videoClipView.translatesAutoresizingMaskIntoConstraints = true
 
         playerView.controlsStyle = .none
-        playerView.videoGravity = .resizeAspectFill
+        playerView.videoGravity = PreviewVideoGravityPolicy.playerVideoGravity
         playerView.wantsLayer = true
         playerView.layer?.backgroundColor = NSColor.clear.cgColor
         playerView.translatesAutoresizingMaskIntoConstraints = true
@@ -1249,11 +1298,11 @@ private final class KeyboardShortcutView: NSView {
 }
 
 private final class PresenterBubblePlayerView: NSView {
-    private let playerView = AVPlayerView()
+    private let playerLayer = AVPlayerLayer()
     private let maskLayer = CAShapeLayer()
     var player: AVPlayer? {
-        get { playerView.player }
-        set { playerView.player = newValue }
+        get { playerLayer.player }
+        set { playerLayer.player = newValue }
     }
 
     var cornerRadius: CGFloat = 0 {
@@ -1272,12 +1321,9 @@ private final class PresenterBubblePlayerView: NSView {
         layer?.masksToBounds = false
         layer?.mask = maskLayer
 
-        playerView.controlsStyle = .none
-        playerView.videoGravity = .resizeAspectFill
-        playerView.wantsLayer = true
-        playerView.layer?.backgroundColor = NSColor.black.cgColor
-        playerView.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(playerView)
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.backgroundColor = NSColor.black.cgColor
+        layer?.addSublayer(playerLayer)
 
         translatesAutoresizingMaskIntoConstraints = true
         updateShadow()
@@ -1294,10 +1340,10 @@ private final class PresenterBubblePlayerView: NSView {
 
     override func layout() {
         super.layout()
-        playerView.frame = bounds
-        playerView.layer?.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        playerView.layer?.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        playerView.layer?.transform = CATransform3DMakeScale(-1, 1, 1)
+        playerLayer.frame = bounds
+        playerLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        playerLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        playerLayer.transform = PresenterPlaybackMirrorPolicy.videoLayerTransform
         updateMask()
     }
 
@@ -1495,7 +1541,7 @@ private final class CursorOverlayView: NSView {
     }
 
     private func overlayPoint(for normalizedPoint: NormalizedPoint, geometry: RealtimePreviewGeometry) -> CGPoint {
-        geometry.contentPoint(for: normalizedPoint)
+        geometry.cursorContentPoint(for: normalizedPoint)
     }
 
     private func drawClickRipple(at point: CGPoint, progress: Double) {

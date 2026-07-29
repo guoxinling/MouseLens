@@ -1,38 +1,39 @@
 # MouseLens App Store / TestFlight Checklist
 
-Updated: 2026-06-21
+Updated: 2026-07-20
 
 ## Current Repository State
 
 - Source project exists.
 - Canonical local test app exists at `.LocalTestApp/MouseLens.app`.
-- Full local tests last passed with 92 tests.
+- MouseLens 1.1 has been approved and released.
+- Active development branch: `codex/1.2-development`.
 - App Store metadata drafts now exist under `AppStore/`.
 - App icon is included in `Resources/Assets.xcassets`.
 - Release uses App Sandbox, Hardened Runtime, and Team `6UYTZXY3H9`.
-- Archive created at `.Archives/MouseLens-0.1.0-1.xcarchive`.
 
-## Blocking Items Before TestFlight Upload
+## 1.2 Blocking Items Before Upload
 
-- [ ] Apple Developer Program account available.
-- [ ] App Store Connect app record created for `MouseLens`.
-- [ ] Bundle ID confirmed: `com.guoxl.MouseLens`.
+- [x] Apple Developer Program account available.
+- [x] App Store Connect app record created.
+- [x] Bundle ID confirmed: `com.guoxl.MouseLens`.
 - [x] `DEVELOPMENT_TEAM` configured for distribution signing.
 - [x] Signing/capabilities configured for Mac App Store distribution.
 - [x] App icon added to `Resources/Assets.xcassets`.
-- [ ] Version/build numbers updated if needed.
-- [x] Archive created with Xcode.
-- [x] Sign in to the Apple Developer account again in Xcode.
-- [x] Account Holder accepts the current Apple Developer Program License Agreement.
-- [x] Create/download a `Mac Installer Distribution` certificate.
-- [x] Create/download a Mac App Store provisioning profile for `com.guoxl.MouseLens`.
-- [x] App Store Connect app record created.
-- [x] Build `0.1.0 (1)` uploaded to App Store Connect on 2026-06-21.
-- [ ] Wait for App Store Connect build processing to complete and select the build.
+- [ ] Set version to `1.2`.
+- [ ] Set build number higher than the latest uploaded 1.1 build.
+- [ ] Run full test suite.
+- [ ] Fresh canonical app build with `./scripts/prepare_local_test_app.sh`.
+- [ ] Screen recording smoke test.
+- [ ] Window recording smoke test.
+- [ ] Presenter camera smoke test.
+- [ ] MP4 export smoke test.
+- [ ] GIF export smoke test.
+- [ ] Archive and export Mac App Store package.
+- [ ] Upload build to App Store Connect.
+- [ ] Wait for build processing to complete and select the build.
 - [ ] Export compliance answered.
-- [ ] App privacy answers completed.
-- [ ] Privacy policy hosted at a public HTTPS URL.
-- [ ] TestFlight internal tester group created.
+- [ ] App privacy answers reconfirmed.
 
 ## Required Metadata
 
@@ -42,33 +43,39 @@ Updated: 2026-06-21
 - [x] Keywords draft
 - [x] Review notes draft
 - [x] Beta test notes draft
-- [ ] Support URL
-- [ ] Privacy Policy URL
+- [x] Support URL
+- [x] Privacy Policy URL
 - [ ] Copyright owner confirmation
 - [ ] Contact email/support page
+- [x] What's New draft for 1.2
+- [x] Promotional text draft for 1.2
 
 ## Required Visual Assets
 
 - [x] App icon
-- [ ] 1 to 10 Mac screenshots
+- [x] Current Mac screenshot set exists under `AppStore/Screenshots/`
+- [ ] Update screenshots for 1.2 if marketing Presenter Camera or GIF export
 - [ ] Optional app preview video
 
-Recommended screenshot set for first beta/store prep:
+Recommended screenshot set for 1.2:
 
 1. Recording toolbar ready state
 2. Countdown or floating recording toolbar
 3. Editor playback with cursor/zoom visible
 4. Zoom Track with Auto/Manual segment
-5. Background/padding/corner radius inspector
-6. Export sheet or exported-result moment
+5. Presenter camera bubble controls
+6. GIF/MP4 export panel
+7. Background/padding/corner radius inspector
 
 ## Pre-Upload Validation
 
-- [x] `xcodebuild test -scheme MouseLens -destination 'platform=macOS'` (92 passed)
-- [x] Fresh canonical app build with `./scripts/prepare_local_test_app.sh`
+- [ ] `xcodebuild test -scheme MouseLens -destination 'platform=macOS'`
+- [ ] Fresh canonical app build with `./scripts/prepare_local_test_app.sh`
 - [ ] Screen recording smoke test
 - [ ] Window recording smoke test
-- [ ] Export smoke test
+- [ ] Presenter camera smoke test
+- [ ] MP4 export smoke test
+- [ ] GIF export smoke test
 - [ ] Permission prompts verified on a clean install path
 
 ## App Store Connect TestFlight Flow

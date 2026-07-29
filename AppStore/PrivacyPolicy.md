@@ -1,6 +1,6 @@
 # MouseLens Privacy Policy
 
-Effective date: 2026-06-19
+Effective date: 2026-07-20
 
 MouseLens is a local-first macOS screen recording and editing app.
 
@@ -12,7 +12,7 @@ MouseLens does not require an account and does not upload your recordings to a s
 
 ## Recordings and Project Files
 
-When you record with MouseLens, screen or window video, optional audio, pointer events, project metadata, and exported videos are stored locally on your Mac.
+When you record with MouseLens, screen or window video, optional audio, optional camera video, pointer events, project metadata, and exported videos or GIFs are stored locally on your Mac.
 
 You control these files and can delete them from your Mac at any time.
 
@@ -22,7 +22,7 @@ MouseLens may request macOS permissions for:
 
 - Screen Recording: to capture the screen or selected windows.
 - Microphone: to include microphone audio when enabled.
-- Accessibility or related system permissions: to observe pointer activity for cursor reconstruction and camera motion.
+- Camera: to include the presenter camera bubble when enabled.
 
 These permissions are used only for the app features you choose to use.
 
@@ -36,7 +36,7 @@ MouseLens does not share recordings or project data with third parties.
 
 ## Contact
 
-TODO: Add support contact email or support page.
+If you have privacy questions, contact guoxinling_xisu@163.com.
 
 ## Changes
 

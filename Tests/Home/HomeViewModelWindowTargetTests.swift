@@ -118,6 +118,27 @@ final class HomeViewModelWindowTargetTests: XCTestCase {
         )
     }
 
+    func testCaptureTargetPreferenceSelfWriteDoesNotReapplyDefaults() {
+        XCTAssertFalse(
+            HomeViewModel.shouldApplyExternalCaptureTargetPreference(
+                current: .window,
+                preference: .window
+            )
+        )
+        XCTAssertTrue(
+            HomeViewModel.shouldApplyExternalCaptureTargetPreference(
+                current: .screen,
+                preference: .window
+            )
+        )
+        XCTAssertTrue(
+            HomeViewModel.shouldApplyExternalCaptureTargetPreference(
+                current: .window,
+                preference: .screen
+            )
+        )
+    }
+
     func testDefaultPresenterBubbleStyleFollowsCapturedMediaAvailability() {
         XCTAssertTrue(HomeViewModel.defaultPresenterBubbleStyle(isEnabled: true).isEnabled)
         XCTAssertFalse(HomeViewModel.defaultPresenterBubbleStyle(isEnabled: false).isEnabled)

@@ -12,13 +12,16 @@ Focus areas:
 4. Editor playback starts immediately after recording.
 5. Cursor, click feedback, Auto Zoom, and Manual Zoom align with the real click location.
 6. Trim, Zoom Track, background, padding, and corner radius controls behave predictably.
-7. Exported MP4 matches the editor preview.
+7. Presenter camera bubble can be positioned before recording and remains consistent in preview/export.
+8. Exported MP4 matches the editor preview.
+9. GIF export works for short trimmed clips.
 
 ## Known Beta Risks
 
 - Window recording should be tested across several apps and display layouts.
 - Multi-display setups need extra verification.
 - Automatic zoom behavior may still need tuning for very dense click sequences.
+- GIF exports are intended for short clips; long GIFs can become large.
 
 ## Feedback Requested
 
@@ -33,4 +36,4 @@ Please include:
 
 ## Beta Review Notes
 
-MouseLens requires Screen Recording permission to capture video. Microphone permission is optional and only needed when microphone audio is enabled. No account is required.
+MouseLens requires Screen Recording permission to capture video. Microphone permission is optional and only needed when microphone audio is enabled. Camera permission is optional and only needed when the presenter camera bubble is enabled. No account is required.

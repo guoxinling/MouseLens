@@ -322,6 +322,11 @@ final class ProjectStoreTests: XCTestCase {
             timestamp: 0.2,
             location: NormalizedPoint(x: 0.9, y: 0.9),
             globalLocation: PointerGlobalLocation(x: 300, y: 600),
+            diagnostics: PointerEventDiagnostics(
+                eventLocationInWindow: PointerGlobalLocation(x: 300, y: 600),
+                convertedScreenLocation: nil,
+                fallbackMouseLocation: PointerGlobalLocation(x: 301, y: 599)
+            ),
             type: .click
         )
         let normalizedClick = PointerEvent(
@@ -329,6 +334,7 @@ final class ProjectStoreTests: XCTestCase {
             timestamp: 0.2,
             location: NormalizedPoint(x: 0.4, y: 0.3),
             globalLocation: rawClick.globalLocation,
+            diagnostics: rawClick.diagnostics,
             type: .click
         )
         let session = CaptureSession(
@@ -367,8 +373,75 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(diagnostics.normalizedClickCount, 1)
         XCTAssertEqual(diagnostics.pointerTimelineOffset, 0, accuracy: 0.0001)
         XCTAssertTrue(diagnostics.droppedClicks.isEmpty)
+        let rawClickDiagnostics = try XCTUnwrap(diagnostics.rawClicks.first?.diagnostics)
+        XCTAssertEqual(rawClickDiagnostics.fallbackMouseLocation.x, 301, accuracy: 0.0001)
         let alignment = try XCTUnwrap(diagnostics.clickAlignments.first)
         XCTAssertEqual(alignment.clickLocation.x, 0.4, accuracy: 0.0001)
+    }
+
+    func testCoordinateDiagnosticsIncludesVisibleSourceClickMapping() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let click = PointerEvent(
+            timestamp: 0.4,
+            location: NormalizedPoint(x: 0.5, y: 0.25),
+            globalLocation: PointerGlobalLocation(x: 665, y: 626.25),
+            type: .click
+        )
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .window, includeMicrophone: false, includeSystemAudio: false),
+            startedAt: Date(),
+            mediaStartedAt: nil,
+            endedAt: Date().addingTimeInterval(3),
+            rawCaptureURL: nil,
+            coordinateSpace: CaptureCoordinateSpace(
+                viewport: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1330, height: 835)),
+                screenBounds: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1470, height: 956))
+            ),
+            sourceFrameSize: CGSize(width: 2940, height: 1670),
+            sourceVisibleRect: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 2660, height: 1670)),
+            windowDiagnostics: CaptureWindowDiagnostics(
+                windowFrame: CaptureViewport(rect: CGRect(x: 0, y: 121, width: 1470, height: 835)),
+                appKitWindowFrame: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1470, height: 835)),
+                adjustedViewport: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1470, height: 835)),
+                filterContentRect: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 2940, height: 1670)),
+                pointPixelScale: 2,
+                bundleIdentifier: "com.google.Chrome"
+            )
+        )
+
+        let project = try store.createProject(
+            from: session,
+            rawEvents: [click],
+            events: [click],
+            keyframes: [CameraKeyframe(timestamp: 0, focus: click.location, zoom: 1.8)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            )
+        )
+
+        let data = try Data(contentsOf: store.coordinateDiagnosticsURL(for: project))
+        let diagnostics = try JSONDecoder().decode(CoordinateDiagnostics.self, from: data)
+        let sourceFrameSize = try XCTUnwrap(diagnostics.sourceFrameSize)
+        let sourceVisibleRect = try XCTUnwrap(diagnostics.sourceVisibleRect)
+        let sourceClickMapping = try XCTUnwrap(diagnostics.sourceClickMappings.first)
+
+        XCTAssertEqual(sourceFrameSize.width, 2940, accuracy: 0.0001)
+        XCTAssertEqual(sourceFrameSize.height, 1670, accuracy: 0.0001)
+        XCTAssertEqual(sourceVisibleRect.rect.width, 2660, accuracy: 0.0001)
+        XCTAssertEqual(sourceVisibleRect.rect.height, 1670, accuracy: 0.0001)
+        let windowDiagnostics = try XCTUnwrap(diagnostics.windowDiagnostics)
+        XCTAssertEqual(windowDiagnostics.pointPixelScale, 2, accuracy: 0.0001)
+        XCTAssertEqual(windowDiagnostics.bundleIdentifier, "com.google.Chrome")
+        XCTAssertEqual(sourceClickMapping.sourcePixelLocation.x, 1330, accuracy: 0.0001)
+        XCTAssertEqual(sourceClickMapping.sourcePixelLocation.y, 417.5, accuracy: 0.0001)
     }
 
     func testCreateProjectPersistsWindowCaptureTarget() throws {
@@ -589,7 +662,7 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertGreaterThan(segment.zoomLevel, 1.25)
         XCTAssertEqual(segment.focus.x, 0.2, accuracy: 0.0001)
         XCTAssertEqual(segment.focus.y, 0.3, accuracy: 0.0001)
-        XCTAssertEqual(segment.easeInDuration, 0.08, accuracy: 0.0001)
+        XCTAssertEqual(segment.easeInDuration, ManualZoomSegment.defaultEaseDuration, accuracy: 0.0001)
         XCTAssertEqual(segment.easeOutDuration, 0, accuracy: 0.0001)
     }
 
@@ -630,7 +703,7 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(project.manualZoomSegments[1].focus.y, 0.20, accuracy: 0.0001)
         XCTAssertEqual(project.manualZoomSegments[2].focus.x, 0.52, accuracy: 0.0001)
         XCTAssertEqual(project.manualZoomSegments[2].focus.y, 0.52, accuracy: 0.0001)
-        XCTAssertTrue(project.manualZoomSegments.allSatisfy { $0.easeInDuration == 0.08 })
+        XCTAssertTrue(project.manualZoomSegments.allSatisfy { $0.easeInDuration == ManualZoomSegment.defaultEaseDuration })
         XCTAssertTrue(project.manualZoomSegments.allSatisfy { $0.easeOutDuration == 0 })
         XCTAssertLessThanOrEqual(project.manualZoomSegments[0].end, project.manualZoomSegments[1].start + 0.0001)
         XCTAssertLessThanOrEqual(project.manualZoomSegments[1].end, project.manualZoomSegments[2].start + 0.0001)

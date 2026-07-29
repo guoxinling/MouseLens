@@ -165,7 +165,13 @@ struct HomeView: View {
                     .layoutPriority(3)
             }
 
-            Picker("Capture Target", selection: $viewModel.selectedCaptureTarget) {
+            Picker(
+                "Capture Target",
+                selection: Binding(
+                    get: { viewModel.selectedCaptureTarget },
+                    set: { viewModel.selectCaptureTarget($0) }
+                )
+            ) {
                 ForEach(CaptureTarget.allCases, id: \.self) { option in
                     Text(option.label).tag(option)
                 }

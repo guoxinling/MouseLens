@@ -22,7 +22,7 @@ struct ExportPanelView: View {
                     sectionLabel("Format")
                     formatCard(
                         title: "MP4",
-                        subtitle: "H.264 · Recommended",
+                        subtitle: "4K / 30 fps default",
                         iconText: "H.264",
                         isSelected: viewModel.exportConfiguration.format == .mp4,
                         isEnabled: true,
@@ -30,7 +30,7 @@ struct ExportPanelView: View {
                     )
                     formatCard(
                         title: "GIF",
-                        subtitle: "720p / 15 fps default",
+                        subtitle: "1080p / 15 fps default",
                         iconText: "GIF",
                         isSelected: viewModel.exportConfiguration.format == .gif,
                         isEnabled: true,

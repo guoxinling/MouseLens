@@ -479,6 +479,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
     let createdAt: Date
     let duration: TimeInterval
     let sourceVideoURL: URL?
+    let sourceVisibleRect: CaptureViewport?
     let captureTarget: CaptureTarget
     let reconstructsCursor: Bool
     let events: [PointerEvent]
@@ -505,12 +506,24 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         effectiveClipSegments.reduce(0) { $0 + $1.duration }
     }
 
+    func effectiveSourceExtent(for sourceExtent: CGRect) -> CGRect {
+        guard let sourceVisibleRect else { return sourceExtent }
+        let visibleRect = sourceVisibleRect.rect
+        guard visibleRect.width > 0,
+              visibleRect.height > 0,
+              sourceExtent.contains(visibleRect) else {
+            return sourceExtent
+        }
+        return visibleRect
+    }
+
     init(
         id: UUID,
         name: String,
         createdAt: Date,
         duration: TimeInterval,
         sourceVideoURL: URL?,
+        sourceVisibleRect: CaptureViewport? = nil,
         captureTarget: CaptureTarget = .screen,
         reconstructsCursor: Bool = false,
         events: [PointerEvent],
@@ -532,6 +545,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         self.createdAt = createdAt
         self.duration = safeDuration
         self.sourceVideoURL = sourceVideoURL
+        self.sourceVisibleRect = sourceVisibleRect
         self.captureTarget = captureTarget
         self.reconstructsCursor = reconstructsCursor
         self.events = events
@@ -550,6 +564,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         case createdAt
         case duration
         case sourceVideoURL
+        case sourceVisibleRect
         case captureTarget
         case reconstructsCursor
         case events
@@ -569,6 +584,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let createdAt = try container.decode(Date.self, forKey: .createdAt)
         let duration = try container.decode(TimeInterval.self, forKey: .duration)
         let sourceVideoURL = try container.decodeIfPresent(URL.self, forKey: .sourceVideoURL)
+        let sourceVisibleRect = try container.decodeIfPresent(CaptureViewport.self, forKey: .sourceVisibleRect)
         let captureTarget = try container.decodeIfPresent(CaptureTarget.self, forKey: .captureTarget) ?? .screen
         let reconstructsCursor = try container.decodeIfPresent(Bool.self, forKey: .reconstructsCursor) ?? false
         let events = try container.decode([PointerEvent].self, forKey: .events)
@@ -586,6 +602,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             createdAt: createdAt,
             duration: duration,
             sourceVideoURL: sourceVideoURL,
+            sourceVisibleRect: sourceVisibleRect,
             captureTarget: captureTarget,
             reconstructsCursor: reconstructsCursor,
             events: events,
@@ -606,6 +623,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(duration, forKey: .duration)
         try container.encodeIfPresent(sourceVideoURL, forKey: .sourceVideoURL)
+        try container.encodeIfPresent(sourceVisibleRect, forKey: .sourceVisibleRect)
         try container.encode(captureTarget, forKey: .captureTarget)
         try container.encode(reconstructsCursor, forKey: .reconstructsCursor)
         try container.encode(events, forKey: .events)
@@ -639,6 +657,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             createdAt: createdAt,
             duration: nextDuration,
             sourceVideoURL: sourceVideoURL,
+            sourceVisibleRect: sourceVisibleRect,
             captureTarget: captureTarget,
             reconstructsCursor: reconstructsCursor,
             events: events,
@@ -766,6 +785,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
 
         let composer = FrameComposer()
         let anticipation: TimeInterval = 0.08
+        let easeInDuration = ManualZoomSegment.defaultEaseDuration
         let tail: TimeInterval = 2.2
         let settleOffset: TimeInterval = 0.55
 
@@ -790,7 +810,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
                 end: end,
                 focus: click.location,
                 zoomLevel: zoomLevel,
-                easeInDuration: anticipation,
+                easeInDuration: easeInDuration,
                 easeOutDuration: 0,
                 source: .auto
             )
@@ -861,6 +881,7 @@ struct CoordinateDiagnostics: Codable, Equatable {
         let type: PointerEventType
         let legacyNormalizedLocation: NormalizedPoint
         let globalLocation: PointerGlobalLocation?
+        let diagnostics: PointerEventDiagnostics?
     }
 
     struct NormalizedSample: Codable, Equatable {
@@ -869,6 +890,7 @@ struct CoordinateDiagnostics: Codable, Equatable {
         let type: PointerEventType
         let location: NormalizedPoint
         let globalLocation: PointerGlobalLocation?
+        let diagnostics: PointerEventDiagnostics?
     }
 
     struct ClickAlignment: Codable, Equatable {
@@ -885,9 +907,24 @@ struct CoordinateDiagnostics: Codable, Equatable {
         let renderedFocusOffsetAfterSettle: Double
     }
 
+    struct SourceClickMapping: Codable, Equatable {
+        let id: UUID
+        let timestamp: TimeInterval
+        let normalizedLocation: NormalizedPoint
+        let sourcePixelLocation: SourcePixelLocation
+    }
+
+    struct SourcePixelLocation: Codable, Equatable {
+        let x: Double
+        let y: Double
+    }
+
     let projectID: UUID
     let captureTarget: CaptureTarget
     let coordinateSpace: CaptureCoordinateSpace?
+    let sourceFrameSize: CGSize?
+    let sourceVisibleRect: CaptureViewport?
+    let windowDiagnostics: CaptureWindowDiagnostics?
     let sessionStartedAt: Date
     let mediaStartedAt: Date?
     let pointerTimelineOffset: TimeInterval
@@ -900,6 +937,7 @@ struct CoordinateDiagnostics: Codable, Equatable {
     let rawClicks: [EventSample]
     let normalizedClicks: [NormalizedSample]
     let droppedClicks: [EventSample]
+    let sourceClickMappings: [SourceClickMapping]
     let clickAlignments: [ClickAlignment]
 }
 
@@ -942,6 +980,7 @@ final class ProjectStore {
             createdAt: createdAt,
             duration: measuredSourceDuration ?? max(session.duration, keyframes.last?.timestamp ?? 6),
             sourceVideoURL: persistedSourceURL,
+            sourceVisibleRect: session.sourceVisibleRect,
             captureTarget: session.configuration.target,
             reconstructsCursor: true,
             events: events,
@@ -1021,6 +1060,9 @@ final class ProjectStore {
             projectID: project.id,
             captureTarget: session.configuration.target,
             coordinateSpace: session.coordinateSpace,
+            sourceFrameSize: session.sourceFrameSize,
+            sourceVisibleRect: session.sourceVisibleRect,
+            windowDiagnostics: session.windowDiagnostics,
             sessionStartedAt: session.startedAt,
             mediaStartedAt: session.mediaStartedAt,
             pointerTimelineOffset: session.mediaStartedAt?.timeIntervalSince(session.startedAt) ?? 0,
@@ -1035,6 +1077,10 @@ final class ProjectStore {
             droppedClicks: rawClicks
                 .filter { normalizedClickIDs.contains($0.id) == false }
                 .map(Self.eventSample),
+            sourceClickMappings: Self.sourceClickMappings(
+                from: normalizedClicks,
+                sourceVisibleRect: session.sourceVisibleRect
+            ),
             clickAlignments: normalizedClicks.map { click in
                 let atClick = composer.snapshot(at: click.timestamp, from: keyframes)
                 let afterSettle = composer.snapshot(at: click.timestamp + 0.55, from: keyframes)
@@ -1070,13 +1116,37 @@ final class ProjectStore {
         try data.write(to: layout.coordinateDiagnosticsURL, options: .atomic)
     }
 
+    private static func sourceClickMappings(
+        from clicks: [PointerEvent],
+        sourceVisibleRect: CaptureViewport?
+    ) -> [CoordinateDiagnostics.SourceClickMapping] {
+        guard let visibleRect = sourceVisibleRect?.rect,
+              visibleRect.width > 0,
+              visibleRect.height > 0 else {
+            return []
+        }
+
+        return clicks.map { click in
+            CoordinateDiagnostics.SourceClickMapping(
+                id: click.id,
+                timestamp: click.timestamp,
+                normalizedLocation: click.location,
+                sourcePixelLocation: CoordinateDiagnostics.SourcePixelLocation(
+                    x: visibleRect.minX + (click.location.x * visibleRect.width),
+                    y: visibleRect.minY + (click.location.y * visibleRect.height)
+                )
+            )
+        }
+    }
+
     private static func eventSample(_ event: PointerEvent) -> CoordinateDiagnostics.EventSample {
         CoordinateDiagnostics.EventSample(
             id: event.id,
             timestamp: event.timestamp,
             type: event.type,
             legacyNormalizedLocation: event.location,
-            globalLocation: event.globalLocation
+            globalLocation: event.globalLocation,
+            diagnostics: event.diagnostics
         )
     }
 
@@ -1086,7 +1156,8 @@ final class ProjectStore {
             timestamp: event.timestamp,
             type: event.type,
             location: event.location,
-            globalLocation: event.globalLocation
+            globalLocation: event.globalLocation,
+            diagnostics: event.diagnostics
         )
     }
 

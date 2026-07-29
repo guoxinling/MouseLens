@@ -31,6 +31,12 @@ struct PointerGlobalLocation: Codable, Equatable {
     }
 }
 
+struct PointerEventDiagnostics: Codable, Equatable {
+    let eventLocationInWindow: PointerGlobalLocation?
+    let convertedScreenLocation: PointerGlobalLocation?
+    let fallbackMouseLocation: PointerGlobalLocation
+}
+
 enum PointerEventType: String, Codable {
     case move
     case click
@@ -42,6 +48,7 @@ struct PointerEvent: Identifiable, Codable, Equatable {
     let timestamp: TimeInterval
     let location: NormalizedPoint
     let globalLocation: PointerGlobalLocation?
+    let diagnostics: PointerEventDiagnostics?
     let type: PointerEventType
 
     init(
@@ -49,12 +56,14 @@ struct PointerEvent: Identifiable, Codable, Equatable {
         timestamp: TimeInterval,
         location: NormalizedPoint,
         globalLocation: PointerGlobalLocation? = nil,
+        diagnostics: PointerEventDiagnostics? = nil,
         type: PointerEventType
     ) {
         self.id = id
         self.timestamp = timestamp
         self.location = location
         self.globalLocation = globalLocation
+        self.diagnostics = diagnostics
         self.type = type
     }
 }
@@ -96,7 +105,12 @@ final class PointerEventStore {
         self.pausedAt = nil
     }
 
-    func append(location: NormalizedPoint, globalLocation: CGPoint? = nil, type: PointerEventType) {
+    func append(
+        location: NormalizedPoint,
+        globalLocation: CGPoint? = nil,
+        diagnostics: PointerEventDiagnostics? = nil,
+        type: PointerEventType
+    ) {
         lock.lock()
         defer { lock.unlock() }
         if origin == nil {
@@ -111,6 +125,7 @@ final class PointerEventStore {
                 timestamp: timestamp,
                 location: location,
                 globalLocation: globalLocation.map(PointerGlobalLocation.init),
+                diagnostics: diagnostics,
                 type: type
             )
         )
@@ -171,17 +186,27 @@ final class EventTapMonitor {
     }
 
     private func recordNSEvent(_ event: NSEvent, as type: PointerEventType) {
-        record(globalPoint: NSEvent.mouseLocation, as: type)
+        let fallbackMouseLocation = NSEvent.mouseLocation
+        record(
+            globalPoint: Self.globalLocation(for: event, fallbackMouseLocation: fallbackMouseLocation),
+            diagnostics: Self.diagnostics(for: event, fallbackMouseLocation: fallbackMouseLocation),
+            as: type
+        )
     }
 
-    private func record(globalPoint: CGPoint, as type: PointerEventType) {
+    private func record(globalPoint: CGPoint, diagnostics: PointerEventDiagnostics? = nil, as type: PointerEventType) {
         let bounds = Self.activeScreenBounds()
-        record(globalPoint: globalPoint, as: type, in: bounds)
+        record(globalPoint: globalPoint, diagnostics: diagnostics, as: type, in: bounds)
     }
 
-    private func record(globalPoint: CGPoint, as type: PointerEventType, in bounds: CGRect) {
+    private func record(
+        globalPoint: CGPoint,
+        diagnostics: PointerEventDiagnostics? = nil,
+        as type: PointerEventType,
+        in bounds: CGRect
+    ) {
         guard let normalized = Self.normalizedLocation(for: globalPoint, in: bounds) else { return }
-        store.append(location: normalized, globalLocation: globalPoint, type: type)
+        store.append(location: normalized, globalLocation: globalPoint, diagnostics: diagnostics, type: type)
     }
 
     static func activeScreenBounds() -> CGRect {
@@ -196,6 +221,28 @@ final class EventTapMonitor {
         return NormalizedPoint(
             x: ((globalLocation.x - bounds.minX) / bounds.width).clamped(to: 0...1),
             y: 1 - ((globalLocation.y - bounds.minY) / bounds.height).clamped(to: 0...1)
+        )
+    }
+
+    static func globalLocation(for event: NSEvent, fallbackMouseLocation: CGPoint) -> CGPoint {
+        if event.window == nil {
+            return fallbackMouseLocation
+        }
+
+        guard let window = event.window else {
+            return fallbackMouseLocation
+        }
+
+        return window.convertPoint(toScreen: event.locationInWindow)
+    }
+
+    static func diagnostics(for event: NSEvent, fallbackMouseLocation: CGPoint) -> PointerEventDiagnostics {
+        let eventLocation = event.locationInWindow
+        let convertedLocation = event.window?.convertPoint(toScreen: eventLocation)
+        return PointerEventDiagnostics(
+            eventLocationInWindow: PointerGlobalLocation(eventLocation),
+            convertedScreenLocation: convertedLocation.map(PointerGlobalLocation.init),
+            fallbackMouseLocation: PointerGlobalLocation(fallbackMouseLocation)
         )
     }
 }

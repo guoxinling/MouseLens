@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import CoreGraphics
 import CoreImage
 import ImageIO
@@ -6,6 +7,10 @@ import XCTest
 @testable import MouseLens
 
 final class SourceCropPlannerTests: XCTestCase {
+    func testPreviewPlayerUsesResizeGravityBecauseGeometryAlreadyAppliesCrop() {
+        XCTAssertEqual(PreviewVideoGravityPolicy.playerVideoGravity, .resize)
+    }
+
     func testMP4ExportComposesPresenterBubbleOverSourceVideo() async throws {
         let directory = try Self.makeTemporaryDirectory()
         let sourceURL = directory.appendingPathComponent("source.mp4")
@@ -216,7 +221,7 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual(crop.midY, source.midY, accuracy: 0.0001)
     }
 
-    func testFocusedCropCanOverscanToKeepEdgeClickCentered() {
+    func testFocusedCropClampsToSourceBoundsNearEdges() {
         let planner = SourceCropPlanner()
         let source = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let snapshot = FrameSnapshot(
@@ -231,13 +236,12 @@ final class SourceCropPlannerTests: XCTestCase {
             snapshot: snapshot
         )
 
-        let expectedX = source.minX + (snapshot.focus.x * source.width)
-        let expectedY = source.maxY - (snapshot.focus.y * source.height)
-
-        XCTAssertEqual(crop.midX, expectedX, accuracy: 0.0001)
-        XCTAssertEqual(crop.midY, expectedY, accuracy: 0.0001)
-        XCTAssertGreaterThan(crop.maxX, source.maxX)
-        XCTAssertGreaterThan(crop.maxY, source.maxY)
+        XCTAssertGreaterThanOrEqual(crop.minX, source.minX - 0.0001)
+        XCTAssertGreaterThanOrEqual(crop.minY, source.minY - 0.0001)
+        XCTAssertLessThanOrEqual(crop.maxX, source.maxX + 0.0001)
+        XCTAssertLessThanOrEqual(crop.maxY, source.maxY + 0.0001)
+        XCTAssertEqual(crop.maxX, source.maxX, accuracy: 0.0001)
+        XCTAssertEqual(crop.maxY, source.maxY, accuracy: 0.0001)
         XCTAssertLessThan(crop.width, source.width)
         XCTAssertLessThan(crop.height, source.height)
     }
@@ -309,7 +313,7 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertEqual(mappedPoint.y, layout.contentRect.midY, accuracy: 0.0001)
     }
 
-    func testMappedContentPointMatchesVisualCenterForEdgeAnchoredCrop() {
+    func testMappedContentPointStaysVisibleForEdgeAnchoredCrop() {
         let planner = SourceCropPlanner()
         let source = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let layout = RenderLayout(renderSize: CGSize(width: 1920, height: 1080), padding: 0.04)
@@ -331,8 +335,10 @@ final class SourceCropPlannerTests: XCTestCase {
             layout: layout
         )
 
-        XCTAssertEqual(mappedPoint.x, layout.contentRect.midX, accuracy: 0.0001)
-        XCTAssertEqual(mappedPoint.y, layout.contentRect.midY, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(mappedPoint.x, layout.contentRect.minX)
+        XCTAssertLessThan(mappedPoint.x, layout.contentRect.midX)
+        XCTAssertGreaterThanOrEqual(mappedPoint.y, layout.contentRect.minY)
+        XCTAssertLessThan(mappedPoint.y, layout.contentRect.midY)
     }
 
     func testMappedContentPointUsesTopOriginPointerCoordinates() {
@@ -489,6 +495,28 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertTrue(shouldPreserveFullSource)
     }
 
+    func testScreenCaptureNonZeroPaddingKeepsFullSourceForCursorAlignment() {
+        let shouldPreserveFullSource = SourcePresentationPolicy.preservesFullSourceAtBase(
+            captureTarget: .screen,
+            padding: 0.04
+        )
+
+        let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let geometry = RealtimePreviewGeometry(
+            sourceSize: CGSize(width: 1470, height: 956),
+            contentRect: contentRect,
+            snapshot: FrameSnapshot(focus: .center, zoom: 1.0, emphasis: .none),
+            preservesFullSourceAtBase: shouldPreserveFullSource
+        )
+
+        XCTAssertTrue(shouldPreserveFullSource)
+        XCTAssertEqual(geometry.cropRect, CGRect(x: 0, y: 0, width: 1470, height: 956))
+        XCTAssertEqual(geometry.contentPoint(for: .init(x: 0, y: 0)).x, geometry.displayRect.minX, accuracy: 0.0001)
+        XCTAssertEqual(geometry.contentPoint(for: .init(x: 0, y: 0)).y, geometry.displayRect.minY, accuracy: 0.0001)
+        XCTAssertEqual(geometry.contentPoint(for: .init(x: 1, y: 1)).x, geometry.displayRect.maxX, accuracy: 0.0001)
+        XCTAssertEqual(geometry.contentPoint(for: .init(x: 1, y: 1)).y, geometry.displayRect.maxY, accuracy: 0.0001)
+    }
+
     func testWindowBasePreviewFitsFullSourceWithoutCropping() {
         let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
         let geometry = RealtimePreviewGeometry(
@@ -545,6 +573,33 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertLessThanOrEqual(mapped.y, geometry.displayRect.maxY)
     }
 
+    func testWindowZoomNearSourceEdgeDoesNotCropOutsideSourceBounds() {
+        let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let geometry = RealtimePreviewGeometry(
+            sourceSize: CGSize(width: 2940, height: 1846),
+            contentRect: contentRect,
+            snapshot: FrameSnapshot(
+                focus: NormalizedPoint(x: 0.12923309948979592, y: 0.9754875406283857),
+                zoom: 1.4088400748388252,
+                emphasis: .click
+            ),
+            preservesFullSourceAtBase: true
+        )
+
+        XCTAssertGreaterThanOrEqual(geometry.cropRect.minX, -0.0001)
+        XCTAssertGreaterThanOrEqual(geometry.cropRect.minY, -0.0001)
+        XCTAssertLessThanOrEqual(geometry.cropRect.maxX, 2940.0001)
+        XCTAssertLessThanOrEqual(geometry.cropRect.maxY, 1846.0001)
+        let effectivePlayerFrame = geometry.videoFrame.offsetBy(
+            dx: -geometry.displayRect.minX,
+            dy: -geometry.displayRect.minY
+        )
+        XCTAssertLessThanOrEqual(effectivePlayerFrame.minX, 0.0001)
+        XCTAssertLessThanOrEqual(effectivePlayerFrame.minY, 0.0001)
+        XCTAssertGreaterThanOrEqual(effectivePlayerFrame.maxX, geometry.displayRect.width - 0.0001)
+        XCTAssertGreaterThanOrEqual(effectivePlayerFrame.maxY, geometry.displayRect.height - 0.0001)
+    }
+
     func testWindowPreviewTransitionsContinuouslyFromFullViewToFocusedCrop() {
         let contentRect = CGRect(x: 0, y: 0, width: 1600, height: 900)
         let fullView = RealtimePreviewGeometry(
@@ -597,6 +652,35 @@ final class SourceCropPlannerTests: XCTestCase {
             CursorGeometry.templateSize.height - CursorGeometry.hotspot.y,
             accuracy: 0.0001
         )
+    }
+
+    func testFullscreenBrowserWindowCursorVisualCalibrationAppliesSmallUpwardOffset() {
+        let offset = CursorVisualCalibrationPolicy.offset(
+            captureTarget: .window,
+            sourceSize: CGSize(width: 2940, height: 1670),
+            sourceExtent: CGRect(x: 0, y: 0, width: 2660, height: 1670)
+        )
+
+        XCTAssertEqual(offset.width, 0, accuracy: 0.0001)
+        XCTAssertEqual(offset.height, -3, accuracy: 0.0001)
+    }
+
+    func testCursorVisualCalibrationDoesNotAffectScreenOrOrdinaryWindow() {
+        let screenOffset = CursorVisualCalibrationPolicy.offset(
+            captureTarget: .screen,
+            sourceSize: CGSize(width: 2940, height: 1670),
+            sourceExtent: CGRect(x: 0, y: 0, width: 2660, height: 1670)
+        )
+        let ordinaryWindowOffset = CursorVisualCalibrationPolicy.offset(
+            captureTarget: .window,
+            sourceSize: CGSize(width: 2940, height: 1670),
+            sourceExtent: CGRect(x: 0, y: 0, width: 2940, height: 1670)
+        )
+
+        XCTAssertEqual(screenOffset.width, 0, accuracy: 0.0001)
+        XCTAssertEqual(screenOffset.height, 0, accuracy: 0.0001)
+        XCTAssertEqual(ordinaryWindowOffset.width, 0, accuracy: 0.0001)
+        XCTAssertEqual(ordinaryWindowOffset.height, 0, accuracy: 0.0001)
     }
 
     func testRealtimePreviewGeometryScalesVideoWhenManualZoomIsActive() {

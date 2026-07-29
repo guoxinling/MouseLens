@@ -29,14 +29,14 @@ final class ExportFilenameTests: XCTestCase {
 
         let filename = ExportCoordinator.exportFilename(for: project, preset: .standardLandscape)
 
-        XCTAssertTrue(filename.hasPrefix("Demo_Apr_17_Product_Tour-"))
+        XCTAssertTrue(filename.hasPrefix("MouseLens_"))
         XCTAssertTrue(filename.hasSuffix("-standardLandscape.mp4"))
         XCTAssertFalse(filename.contains(":"))
         XCTAssertFalse(filename.contains("/"))
         XCTAssertFalse(filename.contains(" "))
     }
 
-    func testConfiguredExportFilenameUsesFormatAndResolution() {
+    func testConfiguredMP4ExportFilenameUsesReadableResolutionFrameRateAndDate() {
         let project = RecordingProject(
             id: UUID(),
             name: "Product Tour",
@@ -57,8 +57,8 @@ final class ExportFilenameTests: XCTestCase {
         )
         let configuration = ExportConfiguration(
             format: .mp4,
-            resolution: .p720,
-            frameRate: .fps15,
+            resolution: .p2160,
+            frameRate: .fps60,
             quality: .small,
             includesCursor: false,
             includesClickFeedback: false
@@ -69,8 +69,11 @@ final class ExportFilenameTests: XCTestCase {
             configuration: configuration
         )
 
-        XCTAssertEqual(configuration.renderSize(for: .portrait), CGSize(width: 720, height: 1280))
-        XCTAssertTrue(filename.hasSuffix("-mp4-p720.mp4"))
+        XCTAssertEqual(configuration.renderSize(for: .portrait), CGSize(width: 2160, height: 3840))
+        XCTAssertTrue(filename.hasPrefix("MouseLens_4K_60fps_"))
+        XCTAssertTrue(filename.hasSuffix(".mp4"))
+        XCTAssertFalse(filename.contains("p2160"))
+        XCTAssertFalse(filename.contains(" "))
     }
 
     func testGIFExportFilenameUsesGIFExtension() {
@@ -95,7 +98,10 @@ final class ExportFilenameTests: XCTestCase {
         let configuration = ExportConfiguration.recommended(for: .landscape, format: .gif)
 
         XCTAssertTrue(
-            ExportCoordinator.exportFilename(for: project, configuration: configuration).hasSuffix("-gif-p720.gif")
+            ExportCoordinator.exportFilename(for: project, configuration: configuration).contains("MouseLens_GIF_1080p_15fps_")
+        )
+        XCTAssertTrue(
+            ExportCoordinator.exportFilename(for: project, configuration: configuration).hasSuffix(".gif")
         )
     }
 }

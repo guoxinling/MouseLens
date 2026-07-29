@@ -20,7 +20,7 @@ Caption idea: `Control recording without leaving the flow`
 
 ### 3. Preview Immediately
 
-Show the editor with playable preview, cursor reconstruction, and click feedback.
+Show the editor with playable preview, cursor emphasis, click feedback, and zoom.
 
 Caption idea: `Preview the result right away`
 
@@ -36,11 +36,23 @@ Show background swatches, padding, corner radius, and the preview canvas.
 
 Caption idea: `Style clean walkthrough videos`
 
-### 6. Export MP4
+### 6. Trim And Export MP4
+
+Show clip trimming with the export panel set to MP4.
+
+Caption idea: `Trim and export polished MP4s`
+
+### 7. Add Presenter Camera
+
+Show the presenter camera bubble in the preview and the controls for position, size, corner radius, and mirroring.
+
+Caption idea: `Add a presenter camera`
+
+### 8. Export MP4 Or GIF
 
 Show the export panel or exported result state.
 
-Caption idea: `Export polished MP4s`
+Caption idea: `Export MP4s and GIFs`
 
 ## Capture Notes
 

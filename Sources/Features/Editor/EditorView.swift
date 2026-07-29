@@ -192,7 +192,14 @@ struct EditorView: View {
                 }
             )
             .frame(width: cardWidth, height: cardHeight)
-            .panelBackground()
+            .compositingGroup()
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: PreviewCardStylePolicy.cornerRadius,
+                    style: .continuous
+                )
+            )
+            .panelBackground(cornerRadius: PreviewCardStylePolicy.cornerRadius)
             .frame(
                 width: geometry.size.width,
                 height: geometry.size.height,
@@ -1386,6 +1393,11 @@ private final class TimelineInteractionView: NSView {
         let deltaProgress = (translationX / max(plotWidth, 1)) * sensitivity
         return Double(deltaProgress) * timelineDuration
     }
+}
+
+struct PreviewCardStylePolicy {
+    static let cornerRadius: CGFloat = 18
+    static let clipsContent = true
 }
 
 private extension View {

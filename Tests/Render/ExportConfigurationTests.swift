@@ -3,11 +3,11 @@ import XCTest
 @testable import MouseLens
 
 final class ExportConfigurationTests: XCTestCase {
-    func testRecommendedMP4Uses1080pThirtyFPSAndHighQuality() {
+    func testRecommendedMP4Uses4KThirtyFPSAndHighQuality() {
         let configuration = ExportConfiguration.recommended(for: .landscape)
 
         XCTAssertEqual(configuration.format, .mp4)
-        XCTAssertEqual(configuration.resolution, .p1080)
+        XCTAssertEqual(configuration.resolution, .p2160)
         XCTAssertEqual(configuration.frameRate, .fps30)
         XCTAssertEqual(configuration.quality, .high)
         XCTAssertTrue(configuration.includesCursor)
@@ -22,7 +22,7 @@ final class ExportConfigurationTests: XCTestCase {
 
         XCTAssertTrue(ExportFormat.gif.isAvailable)
         XCTAssertEqual(configuration.format, .gif)
-        XCTAssertEqual(configuration.resolution, .p720)
+        XCTAssertEqual(configuration.resolution, .p1080)
         XCTAssertEqual(configuration.frameRate, .fps15)
         XCTAssertEqual(configuration.quality, .balanced)
         XCTAssertTrue(configuration.includesCursor)
@@ -44,8 +44,9 @@ final class ExportConfigurationTests: XCTestCase {
     }
 
     func testGIFEstimateIncreasesWithResolution() {
-        let low = ExportConfiguration.recommended(for: .landscape, format: .gif)
-        var high = low
+        var low = ExportConfiguration.recommended(for: .landscape, format: .gif)
+        low.resolution = .p720
+        var high = ExportConfiguration.recommended(for: .landscape, format: .gif)
         high.resolution = .p1080
 
         XCTAssertGreaterThan(

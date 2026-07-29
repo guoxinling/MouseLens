@@ -88,20 +88,20 @@ final class EditorViewModelTests: XCTestCase {
         viewModel.updateExportFormat(.gif)
 
         XCTAssertEqual(viewModel.exportConfiguration.format, .gif)
-        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p720)
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p1080)
         XCTAssertEqual(viewModel.exportConfiguration.frameRate, .fps15)
         XCTAssertEqual(viewModel.exportConfiguration.quality, .balanced)
         XCTAssertEqual(viewModel.exportButtonLabel, "Export GIF")
     }
 
-    func testGIFResolutionCanSwitchTo1080p() {
+    func testGIFResolutionCanSwitchTo720p() {
         let viewModel = makeViewModel()
         viewModel.configure(for: makeProject(followStrength: 0.65, aspectRatio: .landscape))
         viewModel.updateExportFormat(.gif)
 
-        viewModel.updateExportResolution(.p1080)
+        viewModel.updateExportResolution(.p720)
 
-        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p1080)
+        XCTAssertEqual(viewModel.exportConfiguration.resolution, .p720)
     }
 
     func testGIFExportShowsApproximateSizeCaption() {
@@ -815,6 +815,30 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(PreviewFooterMetadataPolicy.promotesRefreshAction(previewState: .failed("Preview failed")))
     }
 
+    func testLivePreviewUsesSingleBackgroundLayer() {
+        XCTAssertFalse(PreviewStageBackgroundPolicy.drawsOuterBackground(usesLiveStylePlayback: true))
+        XCTAssertTrue(PreviewStageBackgroundPolicy.drawsOuterBackground(usesLiveStylePlayback: false))
+    }
+
+    func testPreviewCardClipsWallpaperToRoundedPanel() {
+        XCTAssertTrue(PreviewCardStylePolicy.clipsContent)
+    }
+
+    func testLivePreviewBackgroundIsConstrainedToStageBounds() {
+        XCTAssertTrue(PreviewStageBackgroundPolicy.constrainsBackgroundToStageBounds)
+    }
+
+    func testPreviewStageIsCenteredInsidePreviewCard() {
+        XCTAssertTrue(PreviewStageBackgroundPolicy.centersStageInPreviewCard)
+    }
+
+    func testPresenterPlaybackUsesMirroredVideoLayerTransform() {
+        let transform = PresenterPlaybackMirrorPolicy.videoLayerTransform
+
+        XCTAssertEqual(transform.m11, -1, accuracy: 0.0001)
+        XCTAssertEqual(transform.m22, 1, accuracy: 0.0001)
+    }
+
     func testSpaceKeyTogglesPlayablePreview() {
         XCTAssertTrue(
             PreviewKeyboardShortcutPolicy.shouldTogglePlayback(
@@ -865,6 +889,28 @@ final class EditorViewModelTests: XCTestCase {
 
         XCTAssertEqual(normalized.x, 0.3, accuracy: 0.0001)
         XCTAssertEqual(normalized.y, 0.25, accuracy: 0.0001)
+    }
+
+    func testEventTapUsesFallbackMouseLocationForGlobalEventsWithoutWindow() throws {
+        let click = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: CGPoint(x: 300, y: 600),
+            modifierFlags: [],
+            timestamp: 12.0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+
+        let location = EventTapMonitor.globalLocation(
+            for: click,
+            fallbackMouseLocation: CGPoint(x: 300, y: 560)
+        )
+
+        XCTAssertEqual(location.x, 300, accuracy: 0.0001)
+        XCTAssertEqual(location.y, 560, accuracy: 0.0001)
     }
 
     func testPointerEventStorePreservesRawGlobalLocation() throws {
@@ -929,6 +975,45 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(normalized.count, 1)
         XCTAssertEqual(normalized[0].location.x, 0.1550407410, accuracy: 0.0001)
         XCTAssertEqual(normalized[0].location.y, 0.372013, accuracy: 0.0001)
+    }
+
+    func testFullscreenBrowserWindowPointerNormalizationUsesRawViewportNotVisibleCrop() {
+        let coordinateSpace = CaptureCoordinateSpace(
+            viewport: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1470, height: 835)),
+            screenBounds: CaptureViewport(rect: CGRect(x: 0, y: 0, width: 1470, height: 956))
+        )
+        let topLeftClick = PointerEvent(
+            timestamp: 1.41,
+            location: NormalizedPoint(x: 0.13, y: 0.18),
+            globalLocation: PointerGlobalLocation(x: 237.3359375, y: 801.52734375),
+            type: .click
+        )
+        let rightTopClick = PointerEvent(
+            timestamp: 12.54,
+            location: NormalizedPoint(x: 0.99, y: 0.18),
+            globalLocation: PointerGlobalLocation(x: 1379.546875, y: 801.1171875),
+            type: .click
+        )
+        let farRightClick = PointerEvent(
+            timestamp: 24.07,
+            location: NormalizedPoint(x: 0.98, y: 0.15),
+            globalLocation: PointerGlobalLocation(x: 1439.95703125, y: 817.34765625),
+            type: .click
+        )
+
+        let normalized = HomeViewModel.normalizedPointerEvents(
+            [topLeftClick, rightTopClick, farRightClick],
+            coordinateSpace: coordinateSpace,
+            target: .window
+        )
+
+        XCTAssertEqual(normalized.count, 3)
+        XCTAssertEqual(normalized[0].location.x, 0.161453, accuracy: 0.0001)
+        XCTAssertEqual(normalized[0].location.y, 0.040086, accuracy: 0.0001)
+        XCTAssertEqual(normalized[1].location.x, 0.938467, accuracy: 0.0001)
+        XCTAssertEqual(normalized[1].location.y, 0.040577, accuracy: 0.0001)
+        XCTAssertEqual(normalized[2].location.x, 0.979562, accuracy: 0.0001)
+        XCTAssertEqual(normalized[2].location.y, 0.021141, accuracy: 0.0001)
     }
 
     func testPointerEventStoreCanUseCaptureStartOrigin() {

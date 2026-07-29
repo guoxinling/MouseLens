@@ -252,6 +252,10 @@ struct EditorView: View {
                         presenterInspector
                     }
                 }
+
+                inspectorSection(title: "Captions", systemImage: "text.bubble") {
+                    captionsInspector
+                }
             }
             .padding(20)
         }
@@ -452,6 +456,103 @@ struct EditorView: View {
         case .topRight: "Top Right"
         case .bottomLeft: "Bottom Left"
         case .bottomRight: "Bottom Right"
+        }
+    }
+
+    private var captionsInspector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await viewModel.generateCaptions()
+                    }
+                } label: {
+                    Label(captionGenerateButtonTitle, systemImage: "waveform.and.magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!viewModel.canGenerateCaptions)
+
+                if viewModel.captionGenerationState == .generating {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            captionGenerationMessage
+
+            if !viewModel.captionSegments.isEmpty {
+                Toggle(
+                    "Show Captions",
+                    isOn: Binding(
+                        get: { viewModel.isCaptionTrackEnabled },
+                        set: { viewModel.updateCaptionTrackEnabled($0) }
+                    )
+                )
+                .toggleStyle(.switch)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.captionSegments) { segment in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(timestampLabel(for: segment.start)) - \(timestampLabel(for: segment.end))")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(AppTheme.mutedText)
+
+                            TextField(
+                                "Caption text",
+                                text: Binding(
+                                    get: { segment.text },
+                                    set: { viewModel.updateCaptionSegmentText(id: segment.id, text: $0) }
+                                ),
+                                axis: .vertical
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(1...3)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(0.055))
+                        )
+                    }
+                }
+            }
+        }
+        .font(.system(size: 13))
+    }
+
+    private var captionGenerateButtonTitle: String {
+        switch viewModel.captionGenerationState {
+        case .generating:
+            return "Generating"
+        case .finished:
+            return "Regenerate"
+        case .idle, .failed:
+            return "Generate Captions"
+        }
+    }
+
+    @ViewBuilder
+    private var captionGenerationMessage: some View {
+        switch viewModel.captionGenerationState {
+        case .idle:
+            Text("Uses local speech recognition when available.")
+                .font(.system(size: 11))
+                .foregroundStyle(AppTheme.mutedText)
+        case .generating:
+            Text("Transcribing audio...")
+                .font(.system(size: 11))
+                .foregroundStyle(AppTheme.mutedText)
+        case .finished:
+            Text("Captions are ready to edit.")
+                .font(.system(size: 11))
+                .foregroundStyle(AppTheme.mutedText)
+        case .failed(let message):
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(.red.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

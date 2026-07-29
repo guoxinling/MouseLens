@@ -349,6 +349,9 @@ struct PreviewCanvasView: View {
             )
             let presenterVideoURL = presenterStyle.isEnabled ? project.presenterMedia?.sourceVideoURL : nil
             let cornerRadius = max(project.style.cornerRadius, 0)
+            let activeCaption = project.captionTrack?.isEnabled == true
+                ? project.captionTrack?.segment(at: sourceTimestamp)
+                : nil
 
             ZStack {
                 BackgroundPreviewFill(preset: project.style.backgroundPreset)
@@ -398,6 +401,16 @@ struct PreviewCanvasView: View {
                     }
                 }
                 .frame(width: stageSize.width, height: stageSize.height)
+
+                if let activeCaption, let captionTrack = project.captionTrack {
+                    CaptionPreviewOverlay(
+                        segment: activeCaption,
+                        style: captionTrack.style,
+                        contentRect: contentRect
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(24)
+                }
 
                 if project.reconstructsCursor && project.events.isEmpty {
                     Text("No pointer events captured")
@@ -710,6 +723,60 @@ struct RealtimePreviewGeometry {
     func cursorContentPoint(for normalizedPoint: NormalizedPoint) -> CGPoint {
         let point = contentPoint(for: normalizedPoint)
         return CGPoint(x: point.x + cursorVisualOffset.width, y: point.y + cursorVisualOffset.height)
+    }
+}
+
+private struct CaptionPreviewOverlay: View {
+    let segment: CaptionSegment
+    let style: CaptionStyle
+    let contentRect: CGRect
+
+    var body: some View {
+        Text(segment.text)
+            .font(.system(size: 20 * style.fontScale, weight: .semibold))
+            .foregroundStyle(Color(hex: style.textColorHex) ?? .white)
+            .multilineTextAlignment(.center)
+            .lineLimit(3)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.black.opacity(style.backgroundOpacity))
+            )
+            .frame(width: max(contentRect.width * 0.72, 1))
+            .position(captionPosition)
+            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+    }
+
+    private var captionPosition: CGPoint {
+        let inset = max(contentRect.height * 0.08, 28)
+        switch style.position {
+        case .top:
+            return CGPoint(x: contentRect.midX, y: contentRect.minY + inset)
+        case .center:
+            return CGPoint(x: contentRect.midX, y: contentRect.midY)
+        case .bottom:
+            return CGPoint(x: contentRect.midX, y: contentRect.maxY - inset)
+        }
+    }
+}
+
+private extension Color {
+    init?(hex: String) {
+        var normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("#") {
+            normalized.removeFirst()
+        }
+        guard normalized.count == 6,
+              let value = Int(normalized, radix: 16) else {
+            return nil
+        }
+
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
     }
 }
 

@@ -12,6 +12,13 @@ final class EditorViewModel: ObservableObject {
         let requiredPathExtension: String
     }
 
+    enum CaptionGenerationState: Equatable {
+        case idle
+        case generating
+        case finished
+        case failed(String)
+    }
+
     @Published private(set) var project: RecordingProject?
     @Published var zoomLevel = 0.54 {
         didSet { handleStyleChange(updateExportPreset: false) }
@@ -55,12 +62,16 @@ final class EditorViewModel: ObservableObject {
     @Published private(set) var presenterBubblePosition = PresenterBubbleStyle.defaultValue.position
     @Published private(set) var presenterBubbleSize = PresenterBubbleStyle.defaultValue.normalizedSize
     @Published private(set) var presenterBubbleCornerRadiusRatio = PresenterBubbleStyle.defaultValue.cornerRadiusRatio
+    @Published private(set) var captionGenerationState: CaptionGenerationState = .idle
+    @Published private(set) var isCaptionTrackEnabled = false
+    @Published private(set) var captionSegments: [CaptionSegment] = []
 
     private let exportCoordinator: ExportCoordinator
     private let previewRenderer: any ProjectPreviewRendering
     private let cameraPlanEngine: CameraPlanEngine
     private let projectStore: ProjectStore
     private let preferencesStore: AppPreferencesStore
+    private let transcriptionProvider: any TranscriptionProvider
     private let exportSavePanelSelection: ((RecordingProject, ExportSavePanelConfiguration) -> URL?)?
     private let baseZoom = 1.0
     private let clickDuration = 0.6
@@ -82,6 +93,7 @@ final class EditorViewModel: ObservableObject {
         cameraPlanEngine: CameraPlanEngine,
         projectStore: ProjectStore,
         preferencesStore: AppPreferencesStore,
+        transcriptionProvider: any TranscriptionProvider = AppleSpeechTranscriptionProvider(),
         exportSavePanelSelection: ((RecordingProject, ExportSavePanelConfiguration) -> URL?)? = nil
     ) {
         self.exportCoordinator = exportCoordinator
@@ -89,6 +101,7 @@ final class EditorViewModel: ObservableObject {
         self.cameraPlanEngine = cameraPlanEngine
         self.projectStore = projectStore
         self.preferencesStore = preferencesStore
+        self.transcriptionProvider = transcriptionProvider
         self.exportSavePanelSelection = exportSavePanelSelection
     }
 
@@ -129,7 +142,9 @@ final class EditorViewModel: ObservableObject {
         isEditingTimelineTrim = false
         isEditingManualZoom = false
         isAdjustingManualZoomArea = false
+        captionGenerationState = .idle
         syncPresenterBubbleState(with: project.style.presenterBubbleStyle)
+        syncCaptionState(with: project.captionTrack)
         needsPreviewVideoAfterTrimEdit = false
         needsPreviewVideoAfterManualZoomEdit = false
         syncClipState(with: project.effectiveClipSegments, selectedIndex: 0)
@@ -279,6 +294,10 @@ final class EditorViewModel: ObservableObject {
         project?.presenterMedia != nil
     }
 
+    var canGenerateCaptions: Bool {
+        project?.sourceVideoURL != nil && captionGenerationState != .generating
+    }
+
     var exportUnavailableMessage: String? {
         nil
     }
@@ -333,6 +352,68 @@ final class EditorViewModel: ObservableObject {
                 source: style.source
             )
         }
+    }
+
+    func generateCaptions() async {
+        guard let workingProject = project ?? sourceProject,
+              let sourceVideoURL = workingProject.sourceVideoURL else {
+            captionGenerationState = .failed(Self.describeTranscriptionError(.audioFileUnavailable))
+            return
+        }
+
+        captionGenerationState = .generating
+        let localeIdentifier = CaptionLocaleCatalog.supportedLocaleIdentifiers().first ?? Locale.current.identifier
+        let request = TranscriptionRequest(
+            audioURL: sourceVideoURL,
+            localeIdentifier: localeIdentifier,
+            requiresOnDeviceRecognition: true
+        )
+
+        do {
+            let result = try await transcriptionProvider.transcribe(request)
+            let updatedTrack = result.captionTrack(style: workingProject.captionTrack?.style ?? .defaultValue)
+            applyCaptionTrack(updatedTrack, workingProject: workingProject)
+            captionGenerationState = .finished
+        } catch let error as TranscriptionError {
+            captionGenerationState = .failed(Self.describeTranscriptionError(error))
+        } catch {
+            captionGenerationState = .failed(error.localizedDescription)
+        }
+    }
+
+    func updateCaptionTrackEnabled(_ isEnabled: Bool) {
+        guard let workingProject = project ?? sourceProject,
+              let track = workingProject.captionTrack else { return }
+
+        let updatedTrack = CaptionTrack(
+            isEnabled: isEnabled,
+            localeIdentifier: track.localeIdentifier,
+            segments: track.segments,
+            style: track.style
+        )
+        applyCaptionTrack(updatedTrack, workingProject: workingProject)
+    }
+
+    func updateCaptionSegmentText(id: UUID, text: String) {
+        guard let workingProject = project ?? sourceProject,
+              let track = workingProject.captionTrack else { return }
+
+        let updatedSegments = track.segments.map { segment in
+            guard segment.id == id else { return segment }
+            return CaptionSegment(
+                id: segment.id,
+                start: segment.start,
+                end: segment.end,
+                text: text
+            )
+        }
+        let updatedTrack = CaptionTrack(
+            isEnabled: track.isEnabled,
+            localeIdentifier: track.localeIdentifier,
+            segments: updatedSegments,
+            style: track.style
+        )
+        applyCaptionTrack(updatedTrack, workingProject: workingProject)
     }
 
     func updateExportFormat(_ format: ExportFormat) {
@@ -414,6 +495,23 @@ final class EditorViewModel: ObservableObject {
 
         fragments.append("[\(nsError.domain) \(nsError.code)]")
         return fragments.joined(separator: " ")
+    }
+
+    private static func describeTranscriptionError(_ error: TranscriptionError) -> String {
+        switch error {
+        case .audioFileUnavailable:
+            return "No audio track is available for this recording."
+        case .recognizerUnavailable(let localeIdentifier):
+            return "Speech recognition is not available for \(localeIdentifier)."
+        case .onDeviceRecognitionUnavailable(let localeIdentifier):
+            return "On-device speech recognition is not available for \(localeIdentifier)."
+        case .authorizationDenied:
+            return "Speech recognition permission is required to generate captions."
+        case .noSpeechDetected:
+            return "No speech detected."
+        case .recognitionFailed(let message):
+            return message
+        }
     }
 
     var previewDuration: Double {
@@ -1140,6 +1238,23 @@ final class EditorViewModel: ObservableObject {
         prefersStaticPreview = updatedProject.sourceVideoURL != nil
     }
 
+    private func applyCaptionTrack(_ captionTrack: CaptionTrack, workingProject: RecordingProject) {
+        let updatedProject = workingProject.updating(
+            style: workingProject.style,
+            cameraKeyframes: workingProject.cameraKeyframes,
+            trimRange: currentTrimRange,
+            clipSegments: currentClipSegments,
+            captionTrack: captionTrack
+        )
+
+        project = updatedProject
+        exportState = .idle
+        syncCaptionState(with: captionTrack)
+        scheduleSave(for: updatedProject)
+        schedulePreview(for: updatedProject, debounceNanoseconds: 45_000_000)
+        prefersStaticPreview = updatedProject.sourceVideoURL != nil
+    }
+
     private func defaultManualZoomFocus(at timestamp: TimeInterval, in project: RecordingProject) -> NormalizedPoint {
         let sorted = project.events.sorted { $0.timestamp < $1.timestamp }
         guard let first = sorted.first else { return .center }
@@ -1225,6 +1340,13 @@ final class EditorViewModel: ObservableObject {
         presenterBubblePosition = style.position
         presenterBubbleSize = style.normalizedSize
         presenterBubbleCornerRadiusRatio = style.cornerRadiusRatio
+        isApplyingConfiguration = false
+    }
+
+    private func syncCaptionState(with track: CaptionTrack?) {
+        isApplyingConfiguration = true
+        isCaptionTrackEnabled = track?.isEnabled ?? false
+        captionSegments = track?.segments ?? []
         isApplyingConfiguration = false
     }
 

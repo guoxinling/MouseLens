@@ -372,6 +372,76 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.project?.style.presenterBubbleStyle.normalizedCenter.y ?? -1, 1, accuracy: 0.0001)
     }
 
+    func testGenerateCaptionsStoresEnabledCaptionTrack() async {
+        let sourceURL = URL(fileURLWithPath: "/tmp/source.mov")
+        let provider = FakeTranscriptionProvider(
+            result: TranscriptResult(
+                localeIdentifier: "zh-Hans",
+                segments: [
+                    CaptionSegment(start: 0.1, end: 0.8, text: "你好"),
+                    CaptionSegment(start: 1.0, end: 1.8, text: "MouseLens")
+                ]
+            )
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            sourceVideoURL: sourceURL
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(provider.requests.count, 1)
+        XCTAssertEqual(provider.requests.first?.audioURL, sourceURL)
+        XCTAssertEqual(provider.requests.first?.requiresOnDeviceRecognition, true)
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertTrue(viewModel.isCaptionTrackEnabled)
+        XCTAssertEqual(viewModel.captionSegments.map(\.text), ["你好", "MouseLens"])
+        XCTAssertEqual(viewModel.project?.captionTrack?.localeIdentifier, "zh-Hans")
+        XCTAssertEqual(viewModel.project?.captionTrack?.isEnabled, true)
+    }
+
+    func testGenerateCaptionsFailureKeepsExistingTrackEmpty() async {
+        let provider = FakeTranscriptionProvider(error: TranscriptionError.noSpeechDetected)
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(viewModel.captionGenerationState, .failed("No speech detected."))
+        XCTAssertFalse(viewModel.isCaptionTrackEnabled)
+        XCTAssertTrue(viewModel.captionSegments.isEmpty)
+        XCTAssertNil(viewModel.project?.captionTrack)
+    }
+
+    func testUpdatingCaptionsRebuildsDraftProject() {
+        let firstID = UUID()
+        let track = CaptionTrack(
+            isEnabled: true,
+            localeIdentifier: "en-US",
+            segments: [
+                CaptionSegment(id: firstID, start: 0, end: 1, text: "Original"),
+                CaptionSegment(start: 1.2, end: 2.0, text: "Second")
+            ]
+        )
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape, captionTrack: track)
+        let viewModel = makeViewModel()
+        viewModel.configure(for: project)
+
+        viewModel.updateCaptionTrackEnabled(false)
+        viewModel.updateCaptionSegmentText(id: firstID, text: "Edited caption")
+
+        XCTAssertFalse(viewModel.isCaptionTrackEnabled)
+        XCTAssertEqual(viewModel.captionSegments.first?.text, "Edited caption")
+        XCTAssertEqual(viewModel.project?.captionTrack?.isEnabled, false)
+        XCTAssertEqual(viewModel.project?.captionTrack?.segments.first?.text, "Edited caption")
+    }
+
     func testPreviewTimestampClampsToProjectDuration() {
         let viewModel = makeViewModel()
         let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
@@ -1133,7 +1203,8 @@ final class EditorViewModelTests: XCTestCase {
     }
 
     private func makeViewModel(
-        exportSavePanelSelection: ((RecordingProject, EditorViewModel.ExportSavePanelConfiguration) -> URL?)? = nil
+        exportSavePanelSelection: ((RecordingProject, EditorViewModel.ExportSavePanelConfiguration) -> URL?)? = nil,
+        transcriptionProvider: any TranscriptionProvider = FakeTranscriptionProvider()
     ) -> EditorViewModel {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let store = ProjectStore(rootDirectoryURL: directory)
@@ -1144,6 +1215,7 @@ final class EditorViewModelTests: XCTestCase {
             cameraPlanEngine: CameraPlanEngine(),
             projectStore: store,
             preferencesStore: AppPreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            transcriptionProvider: transcriptionProvider,
             exportSavePanelSelection: exportSavePanelSelection
         )
     }
@@ -1154,7 +1226,9 @@ final class EditorViewModelTests: XCTestCase {
         backgroundPresetID: String = "aurora-air",
         manualZoomSegments: [ManualZoomSegment] = [],
         zoomTrackEdited: Bool = true,
-        duration: TimeInterval = 1.0
+        duration: TimeInterval = 1.0,
+        sourceVideoURL: URL? = nil,
+        captionTrack: CaptionTrack? = nil
     ) -> RecordingProject {
         let events = [
             PointerEvent(timestamp: 0.0, location: .init(x: 0.1, y: 0.2), type: .move),
@@ -1173,7 +1247,7 @@ final class EditorViewModelTests: XCTestCase {
             name: "EditorDraft",
             createdAt: Date(),
             duration: duration,
-            sourceVideoURL: nil,
+            sourceVideoURL: sourceVideoURL,
             events: events,
             cameraKeyframes: keyframes,
             style: ProjectStyle(
@@ -1186,7 +1260,8 @@ final class EditorViewModelTests: XCTestCase {
                 padding: 0.08
             ),
             manualZoomSegments: manualZoomSegments,
-            zoomTrackEdited: zoomTrackEdited
+            zoomTrackEdited: zoomTrackEdited,
+            captionTrack: captionTrack
         )
     }
 
@@ -1219,5 +1294,24 @@ final class EditorViewModelTests: XCTestCase {
                 naturalSize: CGSize(width: 1280, height: 720)
             )
         )
+    }
+}
+
+private final class FakeTranscriptionProvider: TranscriptionProvider {
+    private let result: TranscriptResult?
+    private let error: Error?
+    private(set) var requests: [TranscriptionRequest] = []
+
+    init(result: TranscriptResult? = nil, error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
+
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptResult {
+        requests.append(request)
+        if let error {
+            throw error
+        }
+        return result ?? TranscriptResult(localeIdentifier: "en-US", segments: [])
     }
 }

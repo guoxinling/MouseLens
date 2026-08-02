@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     let onProjectReady: (RecordingProject) -> Void
+    @State private var showingNotesPopover = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -93,6 +94,9 @@ struct HomeView: View {
                 viewModel.includePresenterCamera.toggle()
             }
             .disabled(viewModel.recordingState != .idle)
+
+            notesControl
+                .disabled(viewModel.recordingState != .idle)
 
             aspectRatioControl(isCompact: isCompact)
                 .layoutPriority(2)
@@ -276,6 +280,32 @@ struct HomeView: View {
         }
     }
 
+    private var notesControl: some View {
+        Button {
+            showingNotesPopover.toggle()
+        } label: {
+            Image(systemName: viewModel.recordingNotes.hasContent ? "note.text" : "note.text.badge.plus")
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 40)
+                .foregroundStyle(viewModel.recordingNotes.hasContent ? .white : AppTheme.mutedText)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(viewModel.recordingNotes.hasContent ? AppTheme.accent.opacity(0.95) : Color.white.opacity(0.075))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(viewModel.recordingNotes.hasContent ? 0.26 : 0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Recording notes")
+        .popover(isPresented: $showingNotesPopover, arrowEdge: .bottom) {
+            RecordingNotesPopover(viewModel: viewModel)
+                .frame(width: 360)
+                .padding(16)
+        }
+    }
+
     private var toolbarSubtitle: String {
         if !viewModel.isCanonicalLocalTestApp {
             return "Not running canonical local test app."
@@ -341,6 +371,100 @@ struct HomeView: View {
         case .recording:
             await viewModel.stopRecording()
         }
+    }
+}
+
+private struct RecordingNotesPopover: View {
+    @ObservedObject var viewModel: HomeViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+                Text("Recording Notes")
+                    .font(.system(size: 16, weight: .bold))
+            }
+
+            TextEditor(text: notesTextBinding)
+                .font(.system(size: 13, weight: .medium))
+                .scrollContentBackground(.hidden)
+                .frame(height: 132)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.black.opacity(0.24))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+
+            Toggle("Show while recording", isOn: notesVisibleBinding)
+                .toggleStyle(.switch)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Text Size")
+                    Spacer()
+                    Text(String(format: "%.2f", viewModel.recordingNotes.fontScale))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+                .font(.system(size: 12, weight: .semibold))
+
+                Slider(value: notesFontScaleBinding, in: 0.8...1.6)
+            }
+
+            HStack {
+                Spacer()
+                Button("Clear") {
+                    viewModel.recordingNotes = .defaultValue
+                }
+                .disabled(viewModel.recordingNotes.hasContent == false)
+            }
+        }
+        .foregroundStyle(.white.opacity(0.9))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var notesTextBinding: Binding<String> {
+        Binding(
+            get: { viewModel.recordingNotes.text },
+            set: { text in
+                viewModel.recordingNotes = RecordingNotes(
+                    text: text,
+                    isVisibleDuringRecording: viewModel.recordingNotes.isVisibleDuringRecording,
+                    fontScale: viewModel.recordingNotes.fontScale
+                )
+            }
+        )
+    }
+
+    private var notesVisibleBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.recordingNotes.isVisibleDuringRecording },
+            set: { isVisible in
+                viewModel.recordingNotes = RecordingNotes(
+                    text: viewModel.recordingNotes.text,
+                    isVisibleDuringRecording: isVisible,
+                    fontScale: viewModel.recordingNotes.fontScale
+                )
+            }
+        )
+    }
+
+    private var notesFontScaleBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.recordingNotes.fontScale },
+            set: { fontScale in
+                viewModel.recordingNotes = RecordingNotes(
+                    text: viewModel.recordingNotes.text,
+                    isVisibleDuringRecording: viewModel.recordingNotes.isVisibleDuringRecording,
+                    fontScale: fontScale
+                )
+            }
+        )
     }
 }
 

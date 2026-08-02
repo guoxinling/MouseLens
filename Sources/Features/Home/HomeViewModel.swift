@@ -53,6 +53,7 @@ final class HomeViewModel: ObservableObject {
     @Published var recordingState: RecordingState = .idle
     @Published var showingPermissions = false
     @Published var statusMessage = "Record a screen demo and let MouseLens build the camera motion."
+    @Published var recordingNotes = RecordingNotes.defaultValue
     @Published private(set) var presenterBubbleStyle = PresenterBubbleStyle.defaultValue
     @Published private(set) var presenterCameraPreviewSession: AVCaptureSession?
     @Published var selectedWindowTargetID: UInt32?
@@ -247,7 +248,8 @@ final class HomeViewModel: ObservableObject {
                 events: normalizedEvents,
                 keyframes: keyframes,
                 style: style,
-                presenterMedia: presenterMedia
+                presenterMedia: presenterMedia,
+                recordingNotes: Self.persistedRecordingNotes(from: recordingNotes)
             )
 
             loadRecentProjects()
@@ -542,6 +544,24 @@ final class HomeViewModel: ObservableObject {
             shadowOpacity: PresenterBubbleStyle.defaultValue.shadowOpacity,
             source: .camera
         )
+    }
+
+    static func persistedRecordingNotes(from notes: RecordingNotes) -> RecordingNotes? {
+        notes.hasContent ? notes : nil
+    }
+
+    static func recordingNotesOverlayPayload(
+        from notes: RecordingNotes,
+        recordingState: RecordingState
+    ) -> RecordingNotes? {
+        guard notes.hasContent, notes.isVisibleDuringRecording else { return nil }
+
+        switch recordingState {
+        case .idle:
+            return nil
+        case .countdown, .recording:
+            return notes
+        }
     }
 
     private func presenterBubbleStyleForProject(isEnabled: Bool) -> PresenterBubbleStyle {

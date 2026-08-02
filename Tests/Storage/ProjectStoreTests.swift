@@ -283,6 +283,79 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(decoded.presenterMedia, media)
     }
 
+    func testRecordingProjectPersistsRecordingNotes() throws {
+        let notes = RecordingNotes(
+            text: "Introduce the dashboard, then show export settings.",
+            isVisibleDuringRecording: true,
+            fontScale: 1.16
+        )
+        let project = RecordingProject(
+            id: UUID(),
+            name: "Demo",
+            createdAt: Date(timeIntervalSince1970: 20),
+            duration: 6,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov"),
+            captureTarget: .screen,
+            reconstructsCursor: true,
+            events: [],
+            cameraKeyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                backgroundPresetID: BackgroundPresetCatalog.defaultPresetID,
+                cornerRadius: 10.35,
+                shadowRadius: 24,
+                followStrength: 0.72,
+                clickEmphasis: 0.54,
+                padding: 0.04
+            ),
+            recordingNotes: notes
+        )
+
+        let encoded = try JSONEncoder().encode(project)
+        let decoded = try JSONDecoder().decode(RecordingProject.self, from: encoded)
+
+        XCTAssertEqual(decoded.recordingNotes, notes)
+    }
+
+    func testCreateProjectPersistsRecordingNotes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ProjectStore(rootDirectoryURL: directory)
+        let session = CaptureSession(
+            id: UUID(),
+            configuration: .init(target: .screen, includeMicrophone: true, includeSystemAudio: false),
+            startedAt: Date(),
+            mediaStartedAt: nil,
+            endedAt: Date().addingTimeInterval(3),
+            rawCaptureURL: nil,
+            coordinateSpace: nil
+        )
+        let notes = RecordingNotes(
+            text: "Open settings, explain zoom, then export.",
+            isVisibleDuringRecording: true,
+            fontScale: 1.08
+        )
+
+        let project = try store.createProject(
+            from: session,
+            events: [PointerEvent(timestamp: 0, location: .center, type: .move)],
+            keyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1.0)],
+            style: ProjectStyle(
+                aspectRatio: .landscape,
+                background: .aurora,
+                cornerRadius: 24,
+                shadowRadius: 16,
+                followStrength: 0.5,
+                clickEmphasis: 0.4,
+                padding: 0.08
+            ),
+            recordingNotes: notes
+        )
+
+        let savedProject = try XCTUnwrap(try store.loadRecentProjects(limit: 5).first)
+        XCTAssertEqual(project.recordingNotes, notes)
+        XCTAssertEqual(savedProject.recordingNotes, notes)
+    }
+
     func testLegacyRecordingProjectWithoutPresenterMediaDefaultsToNil() throws {
         let project = RecordingProject(
             id: UUID(),

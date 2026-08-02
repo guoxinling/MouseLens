@@ -27,7 +27,7 @@ struct EditorView: View {
             let isCompactLayout = geometry.size.width < 1040
             let contentHeight = max(geometry.size.height - 61, 1)
             let desktopVerticalPadding: CGFloat = 24
-            let desktopTimelineHeight: CGFloat = 214
+            let desktopTimelineHeight: CGFloat = 242
             let desktopPreviewHeight = max(
                 contentHeight - (desktopVerticalPadding * 2) - desktopTimelineHeight - 18,
                 360
@@ -598,7 +598,7 @@ struct EditorView: View {
         }
         .padding(18)
         .panelBackground(cornerRadius: 18)
-        .frame(minHeight: 214)
+        .frame(minHeight: 242)
     }
 
     private func timelineHeader(project: RecordingProject, segments: [ProjectTrimRange]) -> some View {
@@ -660,9 +660,12 @@ struct EditorView: View {
             let plotWidth = max(geometry.size.width - (trackInset * 2), 1)
             let zoomTrackTop: CGFloat = 6
             let zoomTrackHeight: CGFloat = 30
-            let trackTop: CGFloat = 48
+            let captionTrackTop: CGFloat = 42
+            let captionTrackHeight: CGFloat = 22
+            let trackTop: CGFloat = 76
             let trackHeight = max(geometry.size.height - trackTop - 6, 1)
             let zoomEntries = timelineZoomEntries(for: project)
+            let captionEntries = timelineCaptionEntries(for: project)
             let selectedStartOffset = selectedSegment.map { _ in
                 clipOffset(forSegmentAt: viewModel.selectedClipSegmentIndex, in: segments)
             }
@@ -678,6 +681,16 @@ struct EditorView: View {
                     insetX: trackInset,
                     trackTop: zoomTrackTop,
                     trackHeight: zoomTrackHeight
+                )
+
+                captionLane(
+                    entries: captionEntries,
+                    isEnabled: project.captionTrack?.isEnabled ?? false,
+                    timelineDuration: timelineDuration,
+                    plotWidth: plotWidth,
+                    insetX: trackInset,
+                    trackTop: captionTrackTop,
+                    trackHeight: captionTrackHeight
                 )
 
                 clipLane(
@@ -730,7 +743,7 @@ struct EditorView: View {
                 )
             }
         }
-        .frame(height: 128)
+        .frame(height: 156)
     }
 
     private func timelineZoomEntries(for project: RecordingProject) -> [TimelineZoomSegment] {
@@ -741,6 +754,22 @@ struct EditorView: View {
                 endOffset: project.clipOffset(forSourceTimestamp: segment.end),
                 zoomLevel: segment.zoomLevel,
                 source: segment.source
+            )
+        }
+    }
+
+    private func timelineCaptionEntries(for project: RecordingProject) -> [TimelineCaptionSegment] {
+        guard let captionTrack = project.captionTrack else { return [] }
+
+        return captionTrack.segments.compactMap { segment in
+            let startOffset = project.clipOffset(forSourceTimestamp: segment.start)
+            let endOffset = project.clipOffset(forSourceTimestamp: segment.end)
+            guard endOffset > startOffset else { return nil }
+            return TimelineCaptionSegment(
+                id: segment.id,
+                startOffset: startOffset,
+                endOffset: endOffset,
+                text: segment.text
             )
         }
     }
@@ -821,6 +850,83 @@ struct EditorView: View {
         .frame(width: segmentWidth, height: height - 8)
         .position(x: startX + (segmentWidth / 2), y: centerY)
         .allowsHitTesting(false)
+    }
+
+    private func captionLane(
+        entries: [TimelineCaptionSegment],
+        isEnabled: Bool,
+        timelineDuration: TimeInterval,
+        plotWidth: CGFloat,
+        insetX: CGFloat,
+        trackTop: CGFloat,
+        trackHeight: CGFloat
+    ) -> some View {
+        let centerY = trackTop + (trackHeight / 2)
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.035))
+                .frame(width: plotWidth, height: trackHeight)
+                .position(x: insetX + (plotWidth / 2), y: centerY)
+                .allowsHitTesting(false)
+
+            if entries.isEmpty {
+                Text("Captions")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.mutedText.opacity(0.55))
+                    .padding(.horizontal, 8)
+                    .frame(height: trackHeight)
+                    .position(x: insetX + 38, y: centerY)
+                    .allowsHitTesting(false)
+            } else {
+                ForEach(entries) { entry in
+                    captionSegmentView(
+                        entry: entry,
+                        isEnabled: isEnabled,
+                        timelineDuration: timelineDuration,
+                        plotWidth: plotWidth,
+                        insetX: insetX,
+                        centerY: centerY,
+                        height: trackHeight
+                    )
+                }
+            }
+        }
+    }
+
+    private func captionSegmentView(
+        entry: TimelineCaptionSegment,
+        isEnabled: Bool,
+        timelineDuration: TimeInterval,
+        plotWidth: CGFloat,
+        insetX: CGFloat,
+        centerY: CGFloat,
+        height: CGFloat
+    ) -> some View {
+        let startOffset = min(entry.startOffset, entry.endOffset).clamped(to: 0...timelineDuration)
+        let endOffset = max(entry.startOffset, entry.endOffset).clamped(to: 0...timelineDuration)
+        let startX = xPosition(forClipOffset: startOffset, timelineDuration: timelineDuration, width: plotWidth, insetX: insetX)
+        let endX = xPosition(forClipOffset: endOffset, timelineDuration: timelineDuration, width: plotWidth, insetX: insetX)
+        let segmentWidth = max(endX - startX, 8)
+        let fill = isEnabled ? Color.green.opacity(0.46) : Color.white.opacity(0.16)
+        let stroke = isEnabled ? Color.green.opacity(0.7) : Color.white.opacity(0.26)
+
+        return RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(stroke, lineWidth: 1)
+            )
+            .overlay(
+                Text(entry.text)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(isEnabled ? 0.9 : 0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .padding(.horizontal, 8)
+            )
+            .frame(width: segmentWidth, height: height - 5)
+            .position(x: startX + (segmentWidth / 2), y: centerY)
+            .allowsHitTesting(false)
     }
 
     private func clipLane(
@@ -1107,6 +1213,13 @@ private struct TimelineZoomSegment: Identifiable {
     let endOffset: TimeInterval
     let zoomLevel: Double
     let source: ZoomSegmentSource
+}
+
+private struct TimelineCaptionSegment: Identifiable {
+    let id: UUID
+    let startOffset: TimeInterval
+    let endOffset: TimeInterval
+    let text: String
 }
 
 struct TimelineTrimHitTester {

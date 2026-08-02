@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import XCTest
 @testable import MouseLens
@@ -152,5 +153,34 @@ final class CaptureSizePolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(adjusted, viewport)
+    }
+
+    func testFirstAudioSampleAlignsToVideoSessionStart() {
+        let sessionStart = CMTime(seconds: 10.0, preferredTimescale: 600)
+        let firstAudio = CMTime(seconds: 10.35, preferredTimescale: 600)
+
+        let presentationTime = CaptureAudioRetiming.presentationTime(
+            samplePTS: firstAudio,
+            sessionStartPTS: sessionStart,
+            accumulatedPauseDuration: .zero,
+            firstAudioPTS: firstAudio
+        )
+
+        XCTAssertEqual(presentationTime?.seconds ?? -1, 0, accuracy: 0.0001)
+    }
+
+    func testLaterAudioSamplesKeepTheirDistanceFromFirstAudioSample() {
+        let sessionStart = CMTime(seconds: 10.0, preferredTimescale: 600)
+        let firstAudio = CMTime(seconds: 10.35, preferredTimescale: 600)
+        let laterAudio = CMTime(seconds: 12.10, preferredTimescale: 600)
+
+        let presentationTime = CaptureAudioRetiming.presentationTime(
+            samplePTS: laterAudio,
+            sessionStartPTS: sessionStart,
+            accumulatedPauseDuration: .zero,
+            firstAudioPTS: firstAudio
+        )
+
+        XCTAssertEqual(presentationTime?.seconds ?? -1, 1.75, accuracy: 0.0001)
     }
 }

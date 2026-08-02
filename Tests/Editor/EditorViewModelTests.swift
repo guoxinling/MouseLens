@@ -419,6 +419,160 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.project?.captionTrack)
     }
 
+    func testGenerateCaptionsFallsBackToNextLocaleWhenFirstLocaleDetectsNoSpeech() async {
+        let provider = FakeTranscriptionProvider(
+            queuedResponses: [
+                .failure(TranscriptionError.noSpeechDetected),
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-Hans",
+                    segments: [CaptionSegment(start: 0, end: 1, text: "中文讲解")]
+                ))
+            ]
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(provider.requests.count, 2)
+        XCTAssertEqual(provider.requests[1].localeIdentifier, "zh-CN")
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertEqual(viewModel.captionSegments.map(\.text), ["中文讲解"])
+    }
+
+    func testGenerateCaptionsFallsBackToSystemRecognitionWhenOnDeviceDetectsNoSpeech() async {
+        let provider = OnDeviceFailingTranscriptionProvider(
+            fallbackResult: TranscriptResult(
+                localeIdentifier: "zh-Hans",
+                segments: [CaptionSegment(start: 0.4, end: 1.2, text: "系统识别")]
+            )
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertTrue(provider.requests.contains { $0.requiresOnDeviceRecognition })
+        XCTAssertTrue(provider.requests.contains { $0.requiresOnDeviceRecognition == false })
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertEqual(viewModel.captionSegments.map(\.text), ["系统识别"])
+    }
+
+    func testGenerateCaptionsKeepsTryingWhenLongClipReturnsOnlyOneShortCaption() async {
+        let provider = FakeTranscriptionProvider(
+            queuedResponses: [
+                .success(TranscriptResult(
+                    localeIdentifier: "en-US",
+                    segments: [CaptionSegment(start: 16.4, end: 17.2, text: "partial")]
+                )),
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-CN",
+                    segments: [
+                        CaptionSegment(start: 1.0, end: 3.0, text: "完整中文讲解"),
+                        CaptionSegment(start: 4.0, end: 6.0, text: "继续介绍功能")
+                    ]
+                ))
+            ]
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            duration: 19.0,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(provider.requests.count, 2)
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertEqual(viewModel.captionSegments.map(\.text), ["完整中文讲解", "继续介绍功能"])
+    }
+
+    func testGenerateCaptionsKeepsTryingWhenChineseLocaleReturnsLatinHallucination() async {
+        let provider = FakeTranscriptionProvider(
+            queuedResponses: [
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-CN",
+                    segments: [
+                        CaptionSegment(start: 1.0, end: 3.0, text: "Cynthia woman, Kodak"),
+                        CaptionSegment(start: 3.4, end: 5.0, text: "Kodak yeah going")
+                    ]
+                )),
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-Hans",
+                    segments: [
+                        CaptionSegment(start: 1.0, end: 3.2, text: "这是一段中文讲解"),
+                        CaptionSegment(start: 3.5, end: 5.4, text: "继续介绍字幕功能")
+                    ]
+                ))
+            ]
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            duration: 16.0,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(provider.requests.count, 2)
+        XCTAssertTrue(provider.requests[0].localeIdentifier.lowercased().hasPrefix("zh"))
+        XCTAssertTrue(provider.requests[1].localeIdentifier.lowercased().hasPrefix("zh"))
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertEqual(viewModel.project?.captionTrack?.localeIdentifier, "zh-Hans")
+        XCTAssertEqual(viewModel.captionSegments.map(\.text), ["这是一段中文讲解", "继续介绍字幕功能"])
+    }
+
+    func testGenerateCaptionsKeepsTryingWhenFirstResultOnlyCoversClipEnding() async {
+        let provider = FakeTranscriptionProvider(
+            queuedResponses: [
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-CN",
+                    segments: [
+                        CaptionSegment(start: 13.2, end: 14.4, text: "后面一句"),
+                        CaptionSegment(start: 14.8, end: 16.0, text: "最后一句")
+                    ]
+                )),
+                .success(TranscriptResult(
+                    localeIdentifier: "zh-Hans",
+                    segments: [
+                        CaptionSegment(start: 1.0, end: 2.8, text: "第一句中文讲解"),
+                        CaptionSegment(start: 4.0, end: 5.8, text: "第二句继续介绍"),
+                        CaptionSegment(start: 8.0, end: 9.8, text: "第三句展示效果"),
+                        CaptionSegment(start: 12.4, end: 14.4, text: "最后总结一下")
+                    ]
+                ))
+            ]
+        )
+        let viewModel = makeViewModel(transcriptionProvider: provider)
+        viewModel.configure(for: makeProject(
+            followStrength: 0.65,
+            aspectRatio: .landscape,
+            duration: 18.0,
+            sourceVideoURL: URL(fileURLWithPath: "/tmp/source.mov")
+        ))
+
+        await viewModel.generateCaptions()
+
+        XCTAssertEqual(provider.requests.count, 2)
+        XCTAssertEqual(viewModel.captionGenerationState, .finished)
+        XCTAssertEqual(
+            viewModel.captionSegments.map(\.text),
+            ["第一句中文讲解", "第二句继续介绍", "第三句展示效果", "最后总结一下"]
+        )
+    }
+
     func testUpdatingCaptionsRebuildsDraftProject() {
         let firstID = UUID()
         let track = CaptionTrack(
@@ -1300,18 +1454,49 @@ final class EditorViewModelTests: XCTestCase {
 private final class FakeTranscriptionProvider: TranscriptionProvider {
     private let result: TranscriptResult?
     private let error: Error?
+    private var queuedResponses: [Result<TranscriptResult, Error>]
     private(set) var requests: [TranscriptionRequest] = []
 
-    init(result: TranscriptResult? = nil, error: Error? = nil) {
+    init(
+        result: TranscriptResult? = nil,
+        error: Error? = nil,
+        queuedResponses: [Result<TranscriptResult, Error>] = []
+    ) {
         self.result = result
         self.error = error
+        self.queuedResponses = queuedResponses
     }
 
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptResult {
         requests.append(request)
+        if queuedResponses.isEmpty == false {
+            switch queuedResponses.removeFirst() {
+            case .success(let result):
+                return result
+            case .failure(let error):
+                throw error
+            }
+        }
         if let error {
             throw error
         }
         return result ?? TranscriptResult(localeIdentifier: "en-US", segments: [])
+    }
+}
+
+private final class OnDeviceFailingTranscriptionProvider: TranscriptionProvider {
+    let fallbackResult: TranscriptResult
+    private(set) var requests: [TranscriptionRequest] = []
+
+    init(fallbackResult: TranscriptResult) {
+        self.fallbackResult = fallbackResult
+    }
+
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptResult {
+        requests.append(request)
+        if request.requiresOnDeviceRecognition {
+            throw TranscriptionError.noSpeechDetected
+        }
+        return fallbackResult
     }
 }

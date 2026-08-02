@@ -379,6 +379,8 @@ private struct RootView: View {
     }
 
     private func updateRecordingControlPanel(for state: RecordingState) {
+        updateRecordingNotesPanel(for: state)
+
         switch state {
         case .idle:
             windowController.hideRecordingControlPanel()
@@ -408,6 +410,65 @@ private struct RootView: View {
             }
 
         }
+    }
+
+    private func updateRecordingNotesPanel(for state: RecordingState) {
+        guard let notes = HomeViewModel.recordingNotesOverlayPayload(
+            from: homeViewModel.recordingNotes,
+            recordingState: state
+        ) else {
+            windowController.hideRecordingNotesPanel()
+            return
+        }
+
+        let contentSize = FloatingRecordingNotesView.contentSize(for: notes)
+        windowController.showRecordingNotesPanel(contentSize: contentSize) {
+            FloatingRecordingNotesView(notes: notes)
+        }
+    }
+}
+
+private struct FloatingRecordingNotesView: View {
+    static let baseWidth: CGFloat = 420
+    static let baseHeight: CGFloat = 132
+
+    let notes: RecordingNotes
+
+    static func contentSize(for notes: RecordingNotes) -> NSSize {
+        NSSize(
+            width: baseWidth * CGFloat(notes.fontScale.clamped(to: 0.8...1.6)),
+            height: baseHeight * CGFloat(notes.fontScale.clamped(to: 0.8...1.6))
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 15 * notes.fontScale, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent)
+
+                Text("Notes")
+                    .font(.system(size: 14 * notes.fontScale, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+
+            Text(notes.text)
+                .font(.system(size: 18 * notes.fontScale, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18 * notes.fontScale)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.68))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 

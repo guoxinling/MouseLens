@@ -218,6 +218,32 @@ struct PresenterMedia: Codable, Equatable {
     let naturalSize: CGSize
 }
 
+struct RecordingNotes: Codable, Equatable {
+    static let defaultValue = RecordingNotes(
+        text: "",
+        isVisibleDuringRecording: false,
+        fontScale: 1.0
+    )
+
+    let text: String
+    let isVisibleDuringRecording: Bool
+    let fontScale: Double
+
+    var hasContent: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    init(
+        text: String,
+        isVisibleDuringRecording: Bool,
+        fontScale: Double
+    ) {
+        self.text = text
+        self.isVisibleDuringRecording = isVisibleDuringRecording
+        self.fontScale = fontScale.clamped(to: 0.8...1.6)
+    }
+}
+
 struct ProjectStyle: Codable, Equatable {
     let aspectRatio: ProjectAspectRatio
     let backgroundPresetID: String
@@ -491,6 +517,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
     let zoomTrackEdited: Bool
     let presenterMedia: PresenterMedia?
     let captionTrack: CaptionTrack?
+    let recordingNotes: RecordingNotes?
 
     var effectiveTrimRange: ProjectTrimRange {
         trimRange.clamped(to: duration)
@@ -535,7 +562,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         manualZoomSegments: [ManualZoomSegment] = [],
         zoomTrackEdited: Bool = false,
         presenterMedia: PresenterMedia? = nil,
-        captionTrack: CaptionTrack? = nil
+        captionTrack: CaptionTrack? = nil,
+        recordingNotes: RecordingNotes? = nil
     ) {
         let safeDuration = max(duration, 0)
         let safeTrimRange = (trimRange ?? ProjectTrimRange(start: 0, end: safeDuration)).clamped(to: safeDuration)
@@ -559,6 +587,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         self.zoomTrackEdited = zoomTrackEdited
         self.presenterMedia = presenterMedia
         self.captionTrack = captionTrack
+        self.recordingNotes = recordingNotes
     }
 
     enum CodingKeys: String, CodingKey {
@@ -579,6 +608,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         case zoomTrackEdited
         case presenterMedia
         case captionTrack
+        case recordingNotes
     }
 
     init(from decoder: any Decoder) throws {
@@ -600,6 +630,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         let zoomTrackEdited = try container.decodeIfPresent(Bool.self, forKey: .zoomTrackEdited) ?? false
         let presenterMedia = try container.decodeIfPresent(PresenterMedia.self, forKey: .presenterMedia)
         let captionTrack = try container.decodeIfPresent(CaptionTrack.self, forKey: .captionTrack)
+        let recordingNotes = try container.decodeIfPresent(RecordingNotes.self, forKey: .recordingNotes)
 
         self.init(
             id: id,
@@ -618,7 +649,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             manualZoomSegments: manualZoomSegments,
             zoomTrackEdited: zoomTrackEdited,
             presenterMedia: presenterMedia,
-            captionTrack: captionTrack
+            captionTrack: captionTrack,
+            recordingNotes: recordingNotes
         )
     }
 
@@ -641,6 +673,7 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         try container.encode(zoomTrackEdited, forKey: .zoomTrackEdited)
         try container.encodeIfPresent(presenterMedia, forKey: .presenterMedia)
         try container.encodeIfPresent(captionTrack, forKey: .captionTrack)
+        try container.encodeIfPresent(recordingNotes, forKey: .recordingNotes)
     }
 
     func updating(
@@ -652,7 +685,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
         manualZoomSegments: [ManualZoomSegment]? = nil,
         zoomTrackEdited: Bool? = nil,
         presenterMedia: PresenterMedia? = nil,
-        captionTrack: CaptionTrack? = nil
+        captionTrack: CaptionTrack? = nil,
+        recordingNotes: RecordingNotes? = nil
     ) -> RecordingProject {
         let nextDuration = duration ?? self.duration
         let nextSegments = clipSegments ?? self.clipSegments
@@ -676,7 +710,8 @@ struct RecordingProject: Identifiable, Codable, Equatable {
             manualZoomSegments: manualZoomSegments ?? self.manualZoomSegments,
             zoomTrackEdited: zoomTrackEdited ?? self.zoomTrackEdited,
             presenterMedia: presenterMedia ?? self.presenterMedia,
-            captionTrack: captionTrack ?? self.captionTrack
+            captionTrack: captionTrack ?? self.captionTrack,
+            recordingNotes: recordingNotes ?? self.recordingNotes
         )
     }
 
@@ -972,7 +1007,8 @@ final class ProjectStore {
         events: [PointerEvent],
         keyframes: [CameraKeyframe],
         style: ProjectStyle,
-        presenterMedia: PresenterMedia? = nil
+        presenterMedia: PresenterMedia? = nil,
+        recordingNotes: RecordingNotes? = nil
     ) throws -> RecordingProject {
         let createdAt = Date()
         let slug = createdAt.formatted(.dateTime.year().month().day().hour().minute())
@@ -995,7 +1031,8 @@ final class ProjectStore {
             events: events,
             cameraKeyframes: keyframes,
             style: style,
-            presenterMedia: persistedPresenterMedia
+            presenterMedia: persistedPresenterMedia,
+            recordingNotes: recordingNotes
         )
 
         try save(project: project)

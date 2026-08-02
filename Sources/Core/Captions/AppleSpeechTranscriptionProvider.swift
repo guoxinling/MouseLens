@@ -1,9 +1,11 @@
 import Foundation
+@preconcurrency import AVFoundation
 import Speech
 
 final class AppleSpeechTranscriptionProvider: TranscriptionProvider {
     private let authorizationClient: SpeechAuthorizationClient
     private let recognizerFactory: (Locale) -> SpeechRecognizerClient?
+    private let audioPreparer: TranscriptionAudioPreparing
     private let fileExists: (URL) -> Bool
 
     init(
@@ -11,12 +13,14 @@ final class AppleSpeechTranscriptionProvider: TranscriptionProvider {
         recognizerFactory: @escaping (Locale) -> SpeechRecognizerClient? = { locale in
             AppleSpeechRecognizerClient(locale: locale)
         },
+        audioPreparer: TranscriptionAudioPreparing = AppleSpeechAudioPreparer(),
         fileExists: @escaping (URL) -> Bool = { url in
             FileManager.default.fileExists(atPath: url.path)
         }
     ) {
         self.authorizationClient = authorizationClient
         self.recognizerFactory = recognizerFactory
+        self.audioPreparer = audioPreparer
         self.fileExists = fileExists
     }
 
@@ -40,15 +44,20 @@ final class AppleSpeechTranscriptionProvider: TranscriptionProvider {
         }
 
         do {
+            let preparedAudio = try await audioPreparer.prepareAudioURL(from: request.audioURL)
+            defer { preparedAudio.cleanup() }
             let recognizedSegments = try await recognizer.recognizeFile(
-                at: request.audioURL,
+                at: preparedAudio.url,
                 requiresOnDeviceRecognition: request.requiresOnDeviceRecognition
             )
-            let captionSegments = recognizedSegments
+            let captionSegments = CaptionSegmentGrouper.groupedSegments(
+                from: recognizedSegments,
+                localeIdentifier: request.localeIdentifier
+            )
                 .map { segment in
                     CaptionSegment(
-                        start: segment.start,
-                        end: segment.end,
+                        start: segment.start + preparedAudio.sourceStartOffset,
+                        end: segment.end + preparedAudio.sourceStartOffset,
                         text: segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
                 }
@@ -81,6 +90,114 @@ final class AppleSpeechTranscriptionProvider: TranscriptionProvider {
             return status
         }
         return await authorizationClient.requestAuthorization()
+    }
+}
+
+final class AppleSpeechAudioPreparer: TranscriptionAudioPreparing {
+    private static let speechInputVolumeMultiplier: Float = 6.0
+
+    private let fileManager: FileManager
+    private let temporaryDirectory: URL
+
+    init(
+        fileManager: FileManager = .default,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) {
+        self.fileManager = fileManager
+        self.temporaryDirectory = temporaryDirectory
+    }
+
+    func prepareAudioURL(from sourceURL: URL) async throws -> PreparedTranscriptionAudio {
+        if Self.isAudioOnlyFile(sourceURL) {
+            return PreparedTranscriptionAudio(url: sourceURL)
+        }
+
+        let asset = AVURLAsset(url: sourceURL)
+        let audioTracks = asset.tracks(withMediaType: .audio)
+        guard audioTracks.isEmpty == false else {
+            throw TranscriptionError.audioFileUnavailable
+        }
+        let candidates = audioTracks.enumerated().map { index, track in
+            TranscriptionAudioTrackCandidate(
+                index: index,
+                duration: track.timeRange.duration.seconds,
+                estimatedDataRate: track.estimatedDataRate
+            )
+        }
+        guard let preferredTrackIndex = TranscriptionAudioTrackSelector.preferredTrackIndex(from: candidates),
+              audioTracks.indices.contains(preferredTrackIndex) else {
+            throw TranscriptionError.audioFileUnavailable
+        }
+        let preferredTrack = audioTracks[preferredTrackIndex]
+
+        let composition = AVMutableComposition()
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw TranscriptionError.audioFileUnavailable
+        }
+        let timeRange = preferredTrack.timeRange.duration.isValid && preferredTrack.timeRange.duration.seconds > 0
+            ? preferredTrack.timeRange
+            : CMTimeRange(start: .zero, duration: asset.duration)
+        try compositionTrack.insertTimeRange(timeRange, of: preferredTrack, at: .zero)
+
+        let outputURL = temporaryDirectory
+            .appendingPathComponent("mouselens-caption-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        try? fileManager.removeItem(at: outputURL)
+
+        guard let exportSession = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw TranscriptionError.recognitionFailed("Could not prepare recording audio for captions.")
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        exportSession.shouldOptimizeForNetworkUse = false
+        let mixParameters = AVMutableAudioMixInputParameters(track: compositionTrack)
+        mixParameters.setVolume(Self.speechInputVolumeMultiplier, at: .zero)
+        let audioMix = AVMutableAudioMix()
+        audioMix.inputParameters = [mixParameters]
+        exportSession.audioMix = audioMix
+
+        try await exportAudio(using: exportSession)
+
+        let sourceStartOffset = max(preferredTrack.timeRange.start.seconds, 0)
+        return PreparedTranscriptionAudio(url: outputURL, sourceStartOffset: sourceStartOffset) { [fileManager] in
+            try? fileManager.removeItem(at: outputURL)
+        }
+    }
+
+    private func exportAudio(using exportSession: AVAssetExportSession) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(
+                        throwing: TranscriptionError.recognitionFailed(
+                            exportSession.error?.localizedDescription ?? "Could not prepare recording audio for captions."
+                        )
+                    )
+                default:
+                    continuation.resume(
+                        throwing: TranscriptionError.recognitionFailed("Could not prepare recording audio for captions.")
+                    )
+                }
+            }
+        }
+    }
+
+    private static func isAudioOnlyFile(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "aac", "aif", "aiff", "caf", "m4a", "mp3", "wav":
+            true
+        default:
+            false
+        }
     }
 }
 

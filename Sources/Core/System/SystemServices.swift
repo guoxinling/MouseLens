@@ -157,6 +157,7 @@ final class AppWindowController: NSObject {
     private var captureSetupPanel: NSPanel?
     private var recordingControlPanel: NSPanel?
     private var presenterBubblePanel: NSPanel?
+    private var recordingNotesPanel: NSPanel?
     private var presenterBubbleTrackingFrame: NSRect?
     private var presenterBubblePanelStyle: PresenterBubbleStyle?
     private var presenterBubbleMoveHandler: ((NormalizedPoint) -> Void)?
@@ -276,6 +277,7 @@ final class AppWindowController: NSObject {
         app.windows.forEach { window in
             guard !isRecordingControlPanel(window) else { return }
             guard !isPresenterBubblePanel(window) else { return }
+            guard !isRecordingNotesPanel(window) else { return }
             window.orderOut(nil)
         }
 
@@ -284,6 +286,7 @@ final class AppWindowController: NSObject {
 
     func restoreAfterCapture(activate: Bool = true) {
         hideRecordingControlPanel()
+        hideRecordingNotesPanel()
 
         guard hiddenForCapture else { return }
         hiddenForCapture = false
@@ -318,6 +321,7 @@ final class AppWindowController: NSObject {
         }
         app.windows.forEach { window in
             guard !isRecordingControlPanel(window) else { return }
+            guard !isRecordingNotesPanel(window) else { return }
             guard window.canBecomeKey else { return }
             window.makeKeyAndOrderFront(nil)
         }
@@ -394,6 +398,30 @@ final class AppWindowController: NSObject {
 
     func hideRecordingControlPanel() {
         recordingControlPanel?.orderOut(nil)
+    }
+
+    func showRecordingNotesPanel<Content: View>(
+        contentSize: NSSize = NSSize(width: 420, height: 132),
+        @ViewBuilder content: () -> Content
+    ) {
+        let panel = recordingNotesPanel ?? makeRecordingNotesPanel()
+        panel.contentViewController = NSHostingController(
+            rootView: content()
+                .frame(width: contentSize.width, height: contentSize.height)
+        )
+        panel.setContentSize(contentSize)
+        recordingNotesPanel = panel
+
+        configureCaptureToolbarSpaceBehavior(panel)
+        positionRecordingNotesPanel(panel, panelSize: contentSize)
+        if !hiddenForCapture {
+            NSApplication.shared.unhide(nil)
+        }
+        panel.orderFrontRegardless()
+    }
+
+    func hideRecordingNotesPanel() {
+        recordingNotesPanel?.orderOut(nil)
     }
 
     func showPresenterBubblePanel<Content: View>(
@@ -490,6 +518,7 @@ final class AppWindowController: NSObject {
             !isRecordingControlPanel(window) &&
                 !isCaptureSetupPanel(window) &&
                 !isPresenterBubblePanel(window) &&
+                !isRecordingNotesPanel(window) &&
                 window.canBecomeKey &&
                 !window.isSheet
         }
@@ -584,6 +613,26 @@ final class AppWindowController: NSObject {
         return panel
     }
 
+    private func makeRecordingNotesPanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 132),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.backgroundColor = .clear
+        panel.collectionBehavior = Self.captureToolbarCollectionBehavior
+        panel.canHide = false
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.isOpaque = false
+        panel.isReleasedWhenClosed = false
+        panel.level = .statusBar
+        panel.sharingType = .none
+        return panel
+    }
+
     private func makeCaptureSetupPanel() -> NSPanel {
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: Self.captureSetupContentSize),
@@ -624,6 +673,19 @@ final class AppWindowController: NSObject {
         let origin = NSPoint(
             x: screenFrame.midX - (panelSize.width / 2),
             y: screenFrame.maxY - panelSize.height - 18
+        )
+
+        panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+    }
+
+    private func positionRecordingNotesPanel(
+        _ panel: NSPanel,
+        panelSize: NSSize = NSSize(width: 420, height: 132)
+    ) {
+        let screenFrame = preferredOverlayVisibleFrame()
+        let origin = NSPoint(
+            x: screenFrame.midX - (panelSize.width / 2),
+            y: screenFrame.maxY - panelSize.height - 94
         )
 
         panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
@@ -682,6 +744,10 @@ final class AppWindowController: NSObject {
     private func refreshOverlayWindowsForCurrentSpace() {
         if let panel = recordingControlPanel, panel.isVisible {
             positionRecordingControlPanel(panel, panelSize: panel.contentLayoutRect.size)
+        }
+
+        if let panel = recordingNotesPanel, panel.isVisible {
+            positionRecordingNotesPanel(panel, panelSize: panel.contentLayoutRect.size)
         }
 
         if let panel = captureSetupPanel, panel.isVisible {
@@ -819,6 +885,11 @@ final class AppWindowController: NSObject {
     private func isPresenterBubblePanel(_ window: NSWindow) -> Bool {
         guard let presenterBubblePanel else { return false }
         return window === presenterBubblePanel
+    }
+
+    private func isRecordingNotesPanel(_ window: NSWindow) -> Bool {
+        guard let recordingNotesPanel else { return false }
+        return window === recordingNotesPanel
     }
 
     private func notifyPresenterBubblePanelMoved(_ panel: NSWindow) {

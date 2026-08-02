@@ -348,6 +348,56 @@ enum CaptureSizePolicy {
     }
 }
 
+enum CaptureAudioRetiming {
+    static func presentationTime(
+        samplePTS: CMTime,
+        sessionStartPTS: CMTime,
+        accumulatedPauseDuration: CMTime,
+        firstAudioPTS: CMTime
+    ) -> CMTime? {
+        let baseTimingOffset = CMTimeAdd(sessionStartPTS, accumulatedPauseDuration)
+        return presentationTime(
+            samplePTS: samplePTS,
+            baseTimingOffset: baseTimingOffset,
+            sessionStartPTS: sessionStartPTS,
+            firstAudioPTS: firstAudioPTS
+        )
+    }
+
+    static func presentationTime(
+        samplePTS: CMTime,
+        baseTimingOffset: CMTime,
+        sessionStartPTS: CMTime,
+        firstAudioPTS: CMTime
+    ) -> CMTime? {
+        let offset = timingOffset(
+            baseTimingOffset: baseTimingOffset,
+            sessionStartPTS: sessionStartPTS,
+            firstAudioPTS: firstAudioPTS
+        )
+        let shiftedTime = CMTimeSubtract(samplePTS, offset)
+        guard isUsableTime(shiftedTime) else { return nil }
+        return CMTimeCompare(shiftedTime, .zero) < 0 ? .zero : shiftedTime
+    }
+
+    static func timingOffset(
+        baseTimingOffset: CMTime,
+        sessionStartPTS: CMTime,
+        firstAudioPTS: CMTime
+    ) -> CMTime {
+        let startupDelay = CMTimeSubtract(firstAudioPTS, sessionStartPTS)
+        guard isUsableTime(startupDelay),
+              CMTimeCompare(startupDelay, .zero) > 0 else {
+            return baseTimingOffset
+        }
+        return CMTimeAdd(baseTimingOffset, startupDelay)
+    }
+
+    private static func isUsableTime(_ time: CMTime) -> Bool {
+        time.isValid && time.isNumeric && !time.isIndefinite && !time.isPositiveInfinity && !time.isNegativeInfinity
+    }
+}
+
 enum ScreenRecorderError: LocalizedError {
     case alreadyRecording
     case notRecording
@@ -408,6 +458,7 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
     private var disabledAudioInputs: Set<ObjectIdentifier> = []
     private var lastVideoPresentationTime: CMTime?
     private var lastAudioPresentationTimes: [ObjectIdentifier: CMTime] = [:]
+    private var firstAudioPresentationTimes: [ObjectIdentifier: CMTime] = [:]
     private var firstVideoFrameDate: Date?
     private var sourceFrameSize: CGSize?
     private var visibleSourceRect: CGRect?
@@ -637,9 +688,21 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
         guard samplePTS >= sessionStartPTS else {
             return
         }
-        let shiftedPresentationTime = CMTimeSubtract(samplePTS, timingOffset)
-        guard isUsablePresentationTime(shiftedPresentationTime) else { return }
-        guard CMTimeCompare(shiftedPresentationTime, .zero) >= 0 else { return }
+        if firstAudioPresentationTimes[inputID] == nil {
+            firstAudioPresentationTimes[inputID] = samplePTS
+        }
+        guard let firstAudioPTS = firstAudioPresentationTimes[inputID] else { return }
+        let audioTimingOffset = CaptureAudioRetiming.timingOffset(
+            baseTimingOffset: timingOffset,
+            sessionStartPTS: sessionStartPTS,
+            firstAudioPTS: firstAudioPTS
+        )
+        guard let shiftedPresentationTime = CaptureAudioRetiming.presentationTime(
+            samplePTS: samplePTS,
+            baseTimingOffset: timingOffset,
+            sessionStartPTS: sessionStartPTS,
+            firstAudioPTS: firstAudioPTS
+        ) else { return }
         guard isStrictlyIncreasing(
             shiftedPresentationTime,
             after: lastAudioPresentationTimes[inputID]
@@ -648,7 +711,7 @@ private final class StreamFileRecorder: NSObject, SCStreamOutput, @unchecked Sen
         }
 
         do {
-            let shiftedSample = try retimedSampleBuffer(sampleBuffer, subtracting: timingOffset)
+            let shiftedSample = try retimedSampleBuffer(sampleBuffer, subtracting: audioTimingOffset)
             guard CMSampleBufferDataIsReady(shiftedSample) else { return }
 
             var exceptionMessage: Unmanaged<CFString>?

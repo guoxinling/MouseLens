@@ -14,13 +14,27 @@ final class TranscriptionProviderTests: XCTestCase {
 
     func testSupportedCaptionLocalesIncludeChineseEnglishAndSystemLocale() {
         let locales = CaptionLocaleCatalog.supportedLocaleIdentifiers(
-            systemLocaleIdentifier: "fr-FR"
+            preferredLanguageIdentifiers: ["fr-FR"],
+            systemLocaleIdentifier: "en-US"
         )
 
         XCTAssertEqual(locales.first, "fr-FR")
         XCTAssertTrue(locales.contains("zh-Hans"))
         XCTAssertTrue(locales.contains("en-US"))
         XCTAssertEqual(Set(locales).count, locales.count)
+    }
+
+    func testSupportedCaptionLocalesPreferMacOSLanguageOrderBeforeCurrentLocale() {
+        let locales = CaptionLocaleCatalog.supportedLocaleIdentifiers(
+            preferredLanguageIdentifiers: ["zh-Hans-CN", "en-CN"],
+            systemLocaleIdentifier: "en-US"
+        )
+
+        XCTAssertEqual(locales.prefix(3), ["zh-Hans-CN", "zh-CN", "zh-Hans"])
+        XCTAssertLessThan(
+            locales.firstIndex(of: "zh-CN") ?? Int.max,
+            locales.firstIndex(of: "en-US") ?? Int.max
+        )
     }
 
     func testTranscriptResultBuildsEnabledCaptionTrack() {
@@ -101,7 +115,7 @@ final class TranscriptionProviderTests: XCTestCase {
     func testAppleSpeechProviderBuildsTranscriptFromRecognizedSegments() async throws {
         let recognizer = FakeSpeechRecognizerClient(
             recognizedSegments: [
-                RecognizedSpeechSegment(start: 1.2, duration: 0.6, text: "world"),
+                RecognizedSpeechSegment(start: 2.0, duration: 0.6, text: "world"),
                 RecognizedSpeechSegment(start: 0.1, duration: 0.8, text: "hello")
             ]
         )
@@ -113,7 +127,7 @@ final class TranscriptionProviderTests: XCTestCase {
 
         let result = try await provider.transcribe(
             TranscriptionRequest(
-                audioURL: URL(fileURLWithPath: "/tmp/audio.mov"),
+                audioURL: URL(fileURLWithPath: "/tmp/audio.m4a"),
                 localeIdentifier: "en-US",
                 requiresOnDeviceRecognition: true
             )
@@ -121,8 +135,126 @@ final class TranscriptionProviderTests: XCTestCase {
 
         XCTAssertEqual(result.localeIdentifier, "en-US")
         XCTAssertEqual(result.segments.map(\.text), ["hello", "world"])
-        XCTAssertEqual(result.segments.map(\.start), [0.1, 1.2])
+        XCTAssertEqual(result.segments.map(\.start), [0.1, 2.0])
         XCTAssertEqual(recognizer.lastRequiresOnDeviceRecognition, true)
+    }
+
+    func testAppleSpeechProviderGroupsWordSegmentsIntoPhraseCaptions() async throws {
+        let recognizer = FakeSpeechRecognizerClient(
+            recognizedSegments: [
+                RecognizedSpeechSegment(start: 0.10, duration: 0.20, text: "And"),
+                RecognizedSpeechSegment(start: 0.32, duration: 0.22, text: "I'll"),
+                RecognizedSpeechSegment(start: 0.55, duration: 0.18, text: "show"),
+                RecognizedSpeechSegment(start: 0.75, duration: 0.20, text: "you"),
+                RecognizedSpeechSegment(start: 2.30, duration: 0.30, text: "Next")
+            ]
+        )
+        let provider = AppleSpeechTranscriptionProvider(
+            authorizationClient: FakeSpeechAuthorizationClient(status: .authorized),
+            recognizerFactory: { _ in recognizer },
+            fileExists: { _ in true }
+        )
+
+        let result = try await provider.transcribe(
+            TranscriptionRequest(
+                audioURL: URL(fileURLWithPath: "/tmp/audio.m4a"),
+                localeIdentifier: "en-US",
+                requiresOnDeviceRecognition: true
+            )
+        )
+
+        XCTAssertEqual(result.segments.map(\.text), ["And I'll show you", "Next"])
+        XCTAssertEqual(result.segments.first?.start ?? -1, 0.10, accuracy: 0.0001)
+        XCTAssertEqual(result.segments.first?.end ?? -1, 0.95, accuracy: 0.0001)
+    }
+
+    func testAppleSpeechProviderGroupsChineseSegmentsWithoutSpaces() async throws {
+        let recognizer = FakeSpeechRecognizerClient(
+            recognizedSegments: [
+                RecognizedSpeechSegment(start: 0.10, duration: 0.20, text: "现在"),
+                RecognizedSpeechSegment(start: 0.34, duration: 0.20, text: "开始"),
+                RecognizedSpeechSegment(start: 0.58, duration: 0.20, text: "录制")
+            ]
+        )
+        let provider = AppleSpeechTranscriptionProvider(
+            authorizationClient: FakeSpeechAuthorizationClient(status: .authorized),
+            recognizerFactory: { _ in recognizer },
+            fileExists: { _ in true }
+        )
+
+        let result = try await provider.transcribe(
+            TranscriptionRequest(
+                audioURL: URL(fileURLWithPath: "/tmp/audio.m4a"),
+                localeIdentifier: "zh-CN",
+                requiresOnDeviceRecognition: true
+            )
+        )
+
+        XCTAssertEqual(result.segments.map(\.text), ["现在开始录制"])
+    }
+
+    func testAppleSpeechProviderOffsetsSegmentsByPreparedAudioSourceStart() async throws {
+        let recognizer = FakeSpeechRecognizerClient(
+            recognizedSegments: [
+                RecognizedSpeechSegment(start: 0.1, duration: 0.8, text: "delayed speech")
+            ]
+        )
+        let provider = AppleSpeechTranscriptionProvider(
+            authorizationClient: FakeSpeechAuthorizationClient(status: .authorized),
+            recognizerFactory: { _ in recognizer },
+            audioPreparer: FakeTranscriptionAudioPreparer(
+                preparedURL: URL(fileURLWithPath: "/tmp/prepared-caption-audio.m4a"),
+                sourceStartOffset: 0.35
+            ),
+            fileExists: { _ in true }
+        )
+
+        let result = try await provider.transcribe(
+            TranscriptionRequest(
+                audioURL: URL(fileURLWithPath: "/tmp/source.mov"),
+                localeIdentifier: "en-US",
+                requiresOnDeviceRecognition: true
+            )
+        )
+
+        XCTAssertEqual(result.segments.first?.start ?? -1, 0.45, accuracy: 0.0001)
+        XCTAssertEqual(result.segments.first?.end ?? -1, 1.25, accuracy: 0.0001)
+    }
+
+    func testAppleSpeechProviderRecognizesPreparedAudioInsteadOfRawVideoContainer() async throws {
+        let sourceURL = URL(fileURLWithPath: "/tmp/source.mov")
+        let preparedURL = URL(fileURLWithPath: "/tmp/prepared-caption-audio.m4a")
+        let recognizer = FakeSpeechRecognizerClient()
+        let audioPreparer = FakeTranscriptionAudioPreparer(preparedURL: preparedURL)
+        let provider = AppleSpeechTranscriptionProvider(
+            authorizationClient: FakeSpeechAuthorizationClient(status: .authorized),
+            recognizerFactory: { _ in recognizer },
+            audioPreparer: audioPreparer,
+            fileExists: { _ in true }
+        )
+
+        _ = try await provider.transcribe(
+            TranscriptionRequest(
+                audioURL: sourceURL,
+                localeIdentifier: "zh-Hans",
+                requiresOnDeviceRecognition: true
+            )
+        )
+
+        XCTAssertEqual(audioPreparer.preparedSourceURLs, [sourceURL])
+        XCTAssertEqual(recognizer.lastRecognizedURL, preparedURL)
+        XCTAssertTrue(audioPreparer.didCleanup)
+    }
+
+    func testCaptionAudioTrackSelectionPrefersAudibleTrackOverSilentTrack() {
+        let candidates = [
+            TranscriptionAudioTrackCandidate(index: 0, duration: 31.2, estimatedDataRate: 2_250),
+            TranscriptionAudioTrackCandidate(index: 1, duration: 31.3, estimatedDataRate: 148_477)
+        ]
+
+        let selected = TranscriptionAudioTrackSelector.preferredTrackIndex(from: candidates)
+
+        XCTAssertEqual(selected, 1)
     }
 
     func testAppleSpeechProviderMapsEmptyResultsToNoSpeechDetected() async {
@@ -135,7 +267,7 @@ final class TranscriptionProviderTests: XCTestCase {
         await XCTAssertThrowsTranscriptionError(
             try await provider.transcribe(
                 TranscriptionRequest(
-                    audioURL: URL(fileURLWithPath: "/tmp/audio.mov"),
+                    audioURL: URL(fileURLWithPath: "/tmp/audio.m4a"),
                     localeIdentifier: "en-US"
                 )
             ),
@@ -166,6 +298,7 @@ private final class FakeSpeechRecognizerClient: SpeechRecognizerClient {
     let supportsOnDeviceRecognition: Bool
     let recognizedSegments: [RecognizedSpeechSegment]
     private(set) var lastRequiresOnDeviceRecognition: Bool?
+    private(set) var lastRecognizedURL: URL?
 
     init(
         localeIdentifier: String = "en-US",
@@ -185,8 +318,31 @@ private final class FakeSpeechRecognizerClient: SpeechRecognizerClient {
         at url: URL,
         requiresOnDeviceRecognition: Bool
     ) async throws -> [RecognizedSpeechSegment] {
+        lastRecognizedURL = url
         lastRequiresOnDeviceRecognition = requiresOnDeviceRecognition
         return recognizedSegments
+    }
+}
+
+private final class FakeTranscriptionAudioPreparer: TranscriptionAudioPreparing {
+    let preparedURL: URL
+    let sourceStartOffset: TimeInterval
+    private(set) var preparedSourceURLs: [URL] = []
+    private(set) var didCleanup = false
+
+    init(
+        preparedURL: URL,
+        sourceStartOffset: TimeInterval = 0
+    ) {
+        self.preparedURL = preparedURL
+        self.sourceStartOffset = sourceStartOffset
+    }
+
+    func prepareAudioURL(from sourceURL: URL) async throws -> PreparedTranscriptionAudio {
+        preparedSourceURLs.append(sourceURL)
+        return PreparedTranscriptionAudio(url: preparedURL, sourceStartOffset: sourceStartOffset) { [weak self] in
+            self?.didCleanup = true
+        }
     }
 }
 

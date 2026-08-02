@@ -362,15 +362,14 @@ final class EditorViewModel: ObservableObject {
         }
 
         captionGenerationState = .generating
-        let localeIdentifier = CaptionLocaleCatalog.supportedLocaleIdentifiers().first ?? Locale.current.identifier
-        let request = TranscriptionRequest(
-            audioURL: sourceVideoURL,
-            localeIdentifier: localeIdentifier,
-            requiresOnDeviceRecognition: true
-        )
+        let localeIdentifiers = CaptionLocaleCatalog.supportedLocaleIdentifiers()
 
         do {
-            let result = try await transcriptionProvider.transcribe(request)
+            let result = try await transcribeWithLocaleFallback(
+                sourceVideoURL: sourceVideoURL,
+                localeIdentifiers: localeIdentifiers,
+                clipDuration: workingProject.duration
+            )
             let updatedTrack = result.captionTrack(style: workingProject.captionTrack?.style ?? .defaultValue)
             applyCaptionTrack(updatedTrack, workingProject: workingProject)
             captionGenerationState = .finished
@@ -378,6 +377,111 @@ final class EditorViewModel: ObservableObject {
             captionGenerationState = .failed(Self.describeTranscriptionError(error))
         } catch {
             captionGenerationState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func transcribeWithLocaleFallback(
+        sourceVideoURL: URL,
+        localeIdentifiers: [String],
+        clipDuration: TimeInterval
+    ) async throws -> TranscriptResult {
+        var lastError: TranscriptionError?
+        var bestSparseResult: TranscriptResult?
+        let candidates = localeIdentifiers.isEmpty ? [Locale.current.identifier] : localeIdentifiers
+
+        for requiresOnDeviceRecognition in [true, false] {
+            for localeIdentifier in candidates {
+                do {
+                    let result = try await transcriptionProvider.transcribe(
+                        TranscriptionRequest(
+                            audioURL: sourceVideoURL,
+                            localeIdentifier: localeIdentifier,
+                            requiresOnDeviceRecognition: requiresOnDeviceRecognition
+                        )
+                    )
+                    if Self.isLowConfidenceCaptionLanguageMatch(result, requestedLocaleIdentifier: localeIdentifier) {
+                        continue
+                    }
+                    guard Self.isSparseCaptionResult(result, clipDuration: clipDuration) else {
+                        return result
+                    }
+                    if bestSparseResult == nil || result.segments.count > (bestSparseResult?.segments.count ?? 0) {
+                        bestSparseResult = result
+                    }
+                } catch let error as TranscriptionError {
+                    lastError = error
+                    guard Self.shouldTryNextCaptionLocale(after: error) else {
+                        throw error
+                    }
+                }
+            }
+        }
+
+        if let bestSparseResult {
+            return bestSparseResult
+        }
+        throw lastError ?? TranscriptionError.noSpeechDetected
+    }
+
+    private static func isSparseCaptionResult(_ result: TranscriptResult, clipDuration: TimeInterval) -> Bool {
+        guard clipDuration >= 8 else { return false }
+
+        let totalCaptionDuration = result.segments.reduce(0) { $0 + $1.duration }
+        let totalTextLength = result.segments.reduce(0) { $0 + $1.text.count }
+        if result.segments.count <= 1 {
+            return totalCaptionDuration < min(clipDuration * 0.16, 2.0) && totalTextLength < 18
+        }
+
+        let sortedSegments = result.segments.sorted { lhs, rhs in
+            if abs(lhs.start - rhs.start) > 0.0001 {
+                return lhs.start < rhs.start
+            }
+            return lhs.text < rhs.text
+        }
+        guard let firstSegment = sortedSegments.first,
+              let lastSegment = sortedSegments.last else {
+            return true
+        }
+
+        let captionSpan = lastSegment.end - firstSegment.start
+        let coversOnlySmallEndingWindow = firstSegment.start > clipDuration * 0.45
+            && result.segments.count <= 2
+            && captionSpan < min(clipDuration * 0.28, 5.0)
+            && totalCaptionDuration < min(clipDuration * 0.22, 4.0)
+            && totalTextLength < 32
+        return coversOnlySmallEndingWindow
+    }
+
+    private static func isLowConfidenceCaptionLanguageMatch(
+        _ result: TranscriptResult,
+        requestedLocaleIdentifier: String
+    ) -> Bool {
+        guard requestedLocaleIdentifier.lowercased().hasPrefix("zh") else {
+            return false
+        }
+
+        let combinedText = result.segments.map(\.text).joined()
+        guard combinedText.isEmpty == false else {
+            return false
+        }
+
+        return combinedText.contains { character in
+            character.unicodeScalars.contains { scalar in
+                (0x4E00...0x9FFF).contains(Int(scalar.value))
+            }
+        } == false
+    }
+
+    private static func shouldTryNextCaptionLocale(after error: TranscriptionError) -> Bool {
+        switch error {
+        case .noSpeechDetected,
+             .recognizerUnavailable,
+             .onDeviceRecognitionUnavailable:
+            true
+        case .audioFileUnavailable,
+             .authorizationDenied,
+             .recognitionFailed:
+            false
         }
     }
 

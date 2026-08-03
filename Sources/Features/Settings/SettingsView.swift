@@ -39,6 +39,18 @@ struct SettingsView: View {
                     Toggle("Reveal export in Finder automatically", isOn: $preferences.autoRevealExportInFinder)
                 }
 
+                Section("Language") {
+                    Picker("App language", selection: $preferences.appLanguage) {
+                        ForEach(AppLanguagePreference.allCases, id: \.self) { language in
+                            Text(LocalizedStringKey(language.label)).tag(language)
+                        }
+                    }
+
+                    Text("Language changes apply immediately to the main MouseLens interface.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.mutedText)
+                }
+
                 Section("Shortcut") {
                     HStack {
                         Text("Global toggle")
@@ -67,6 +79,6 @@ struct SettingsView: View {
     }
 
     private var countdownLabel: String {
-        preferences.countdownSeconds == 0 ? "Off" : "\(preferences.countdownSeconds)s"
+        preferences.countdownSeconds == 0 ? String(localized: "Off") : "\(preferences.countdownSeconds)s"
     }
 }

@@ -16,6 +16,7 @@ final class AppPreferencesStoreTests: XCTestCase {
         firstStore.defaultPresenterCameraEnabled = true
         firstStore.defaultCaptureTarget = .window
         firstStore.defaultAspectRatio = .portrait
+        firstStore.appLanguage = .simplifiedChinese
         firstStore.autoRevealExportInFinder = true
 
         let secondStore = AppPreferencesStore(defaults: defaults)
@@ -26,6 +27,18 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(secondStore.defaultPresenterCameraEnabled)
         XCTAssertEqual(secondStore.defaultCaptureTarget, .window)
         XCTAssertEqual(secondStore.defaultAspectRatio, .portrait)
+        XCTAssertEqual(secondStore.appLanguage, .simplifiedChinese)
         XCTAssertTrue(secondStore.autoRevealExportInFinder)
+    }
+
+    func testAppLanguageDefaultsToSystem() {
+        let suiteName = "MouseLensTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let store = AppPreferencesStore(defaults: defaults)
+
+        XCTAssertEqual(store.appLanguage, .system)
+        XCTAssertNil(store.appLanguage.localeIdentifier)
     }
 }

@@ -133,7 +133,7 @@ struct ExportPanelView: View {
                         ExportConfiguration.allowedResolutions(for: viewModel.exportConfiguration.format),
                         id: \.self
                     ) { resolution in
-                        Text(resolution.label).tag(resolution)
+                        Text(LocalizedStringKey(resolution.label)).tag(resolution)
                     }
                 }
                 .labelsHidden()
@@ -153,10 +153,10 @@ struct ExportPanelView: View {
                         set: { viewModel.updateExportFrameRate($0) }
                     )) {
                         ForEach(
-                            ExportConfiguration.allowedFrameRates(for: viewModel.exportConfiguration.format),
-                            id: \.self
-                        ) { frameRate in
-                            Text(frameRate.label).tag(frameRate)
+                        ExportConfiguration.allowedFrameRates(for: viewModel.exportConfiguration.format),
+                        id: \.self
+                    ) { frameRate in
+                            Text(LocalizedStringKey(frameRate.label)).tag(frameRate)
                         }
                     }
                     .labelsHidden()
@@ -173,7 +173,7 @@ struct ExportPanelView: View {
                         set: { viewModel.updateExportQuality($0) }
                     )) {
                         ForEach(ExportQuality.allCases, id: \.self) { quality in
-                            Text(quality.label).tag(quality)
+                            Text(LocalizedStringKey(quality.label)).tag(quality)
                         }
                     }
                     .labelsHidden()
@@ -231,7 +231,7 @@ struct ExportPanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("\(viewModel.estimatedExportSizeCaption): \(viewModel.estimatedExportSizeLabel)")
+            Text("\(Text(LocalizedStringKey(viewModel.estimatedExportSizeCaption))): \(viewModel.estimatedExportSizeLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(AppTheme.mutedText.opacity(0.82))
 
@@ -245,7 +245,7 @@ struct ExportPanelView: View {
                     } else {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    Text(isExporting ? "Exporting" : viewModel.exportButtonLabel)
+                    Text(LocalizedStringKey(isExporting ? "Exporting" : viewModel.exportButtonLabel))
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 34)
@@ -264,7 +264,7 @@ struct ExportPanelView: View {
     }
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text)
+        Text(LocalizedStringKey(text))
             .font(.system(size: 10, weight: .bold))
             .textCase(.uppercase)
             .foregroundStyle(AppTheme.mutedText.opacity(0.75))
@@ -287,9 +287,9 @@ struct ExportPanelView: View {
                     .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 7))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
+                    Text(LocalizedStringKey(title))
                         .font(.system(size: 14, weight: .semibold))
-                    Text(subtitle)
+                    Text(LocalizedStringKey(subtitle))
                         .font(.system(size: 10.5))
                         .foregroundStyle(AppTheme.mutedText)
                 }
@@ -317,7 +317,7 @@ struct ExportPanelView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         HStack(spacing: 10) {
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.84))
             Spacer()

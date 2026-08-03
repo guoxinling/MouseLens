@@ -1,6 +1,34 @@
 import Combine
 import Foundation
 
+enum AppLanguagePreference: String, CaseIterable, Codable {
+    case system
+    case english
+    case simplifiedChinese
+
+    var label: String {
+        switch self {
+        case .system:
+            "System"
+        case .english:
+            "English"
+        case .simplifiedChinese:
+            "简体中文"
+        }
+    }
+
+    var localeIdentifier: String? {
+        switch self {
+        case .system:
+            nil
+        case .english:
+            "en"
+        case .simplifiedChinese:
+            "zh-Hans"
+        }
+    }
+}
+
 @MainActor
 final class AppPreferencesStore: ObservableObject {
     private enum Keys {
@@ -12,6 +40,7 @@ final class AppPreferencesStore: ObservableObject {
         static let defaultCaptureTarget = "preferences.defaultCaptureTarget"
         static let defaultAspectRatio = "preferences.defaultAspectRatio"
         static let autoRevealExportInFinder = "preferences.autoRevealExportInFinder"
+        static let appLanguage = "preferences.appLanguage"
     }
 
     @Published var countdownSeconds: Int {
@@ -49,6 +78,10 @@ final class AppPreferencesStore: ObservableObject {
         didSet { defaults.set(defaultAspectRatio.rawValue, forKey: Keys.defaultAspectRatio) }
     }
 
+    @Published var appLanguage: AppLanguagePreference {
+        didSet { defaults.set(appLanguage.rawValue, forKey: Keys.appLanguage) }
+    }
+
     @Published var autoRevealExportInFinder: Bool {
         didSet { defaults.set(autoRevealExportInFinder, forKey: Keys.autoRevealExportInFinder) }
     }
@@ -76,6 +109,8 @@ final class AppPreferencesStore: ObservableObject {
             defaultAspectRatio = .landscape
         }
 
+        appLanguage = defaults.string(forKey: Keys.appLanguage)
+            .flatMap(AppLanguagePreference.init(rawValue:)) ?? .system
         autoRevealExportInFinder = defaults.object(forKey: Keys.autoRevealExportInFinder) as? Bool ?? false
     }
 }

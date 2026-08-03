@@ -127,7 +127,7 @@ struct HomeView: View {
             Button {
                 Task { await handleRecordingToolbarAction() }
             } label: {
-                Label(toolbarActionTitle, systemImage: toolbarActionIcon)
+                Label(LocalizedStringKey(toolbarActionTitle), systemImage: toolbarActionIcon)
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -177,7 +177,7 @@ struct HomeView: View {
                 )
             ) {
                 ForEach(CaptureTarget.allCases, id: \.self) { option in
-                    Text(option.label).tag(option)
+                    Text(LocalizedStringKey(option.label)).tag(option)
                 }
             }
             .pickerStyle(.segmented)

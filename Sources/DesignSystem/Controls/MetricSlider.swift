@@ -8,7 +8,7 @@ struct MetricSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(label)
+                Text(LocalizedStringKey(label))
                 Spacer()
                 Text(value, format: .number.precision(.fractionLength(2)))
                     .foregroundStyle(.secondary)

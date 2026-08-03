@@ -284,7 +284,7 @@ struct EditorView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: systemImage)
+            Label(LocalizedStringKey(title), systemImage: systemImage)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))
 
@@ -391,7 +391,7 @@ struct EditorView: View {
     }
 
     private func zoomSourceBadge(for source: ZoomSegmentSource) -> some View {
-        Text(source == .auto ? "Auto" : "Manual")
+        Text(LocalizedStringKey(source == .auto ? "Auto" : "Manual"))
             .font(.system(size: 11, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
             .padding(.horizontal, 8)
@@ -421,7 +421,7 @@ struct EditorView: View {
                 )
             ) {
                 ForEach(PresenterBubblePosition.allCases, id: \.self) { position in
-                    Text(presenterPositionLabel(for: position)).tag(position)
+                    Text(LocalizedStringKey(presenterPositionLabel(for: position))).tag(position)
                 }
             }
             .pickerStyle(.menu)
@@ -467,7 +467,7 @@ struct EditorView: View {
                         await viewModel.generateCaptions()
                     }
                 } label: {
-                    Label(captionGenerateButtonTitle, systemImage: "waveform.and.magnifyingglass")
+                    Label(LocalizedStringKey(captionGenerateButtonTitle), systemImage: "waveform.and.magnifyingglass")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -549,7 +549,7 @@ struct EditorView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(AppTheme.mutedText)
         case .failed(let message):
-            Text(message)
+            Text(LocalizedStringKey(message))
                 .font(.system(size: 11))
                 .foregroundStyle(.red.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
@@ -619,14 +619,14 @@ struct EditorView: View {
                 Button {
                     viewModel.splitTimelineSelectionAtPlayhead()
                 } label: {
-                    Label("Split \(viewModel.timelineSelectionLabel)", systemImage: "square.split.2x1")
+                    Label(LocalizedStringKey("Split \(viewModel.timelineSelectionLabel)"), systemImage: "square.split.2x1")
                 }
                 .disabled(!viewModel.canSplitTimelineSelection)
 
                 Button {
                     viewModel.deleteTimelineSelection()
                 } label: {
-                    Label("Delete \(viewModel.timelineSelectionLabel)", systemImage: "trash")
+                    Label(LocalizedStringKey("Delete \(viewModel.timelineSelectionLabel)"), systemImage: "trash")
                 }
                 .disabled(!viewModel.canDeleteTimelineSelection)
 

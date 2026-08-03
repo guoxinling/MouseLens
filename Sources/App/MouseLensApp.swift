@@ -8,6 +8,7 @@ struct MouseLensApp: App {
     @StateObject private var coordinator: AppCoordinator
     @StateObject private var homeViewModel: HomeViewModel
     @StateObject private var editorViewModel: EditorViewModel
+    @StateObject private var preferencesStore: AppPreferencesStore
 
     private let environment: AppEnvironment
 
@@ -18,6 +19,7 @@ struct MouseLensApp: App {
         self.environment = environment
         _coordinator = StateObject(wrappedValue: coordinator)
         _homeViewModel = StateObject(wrappedValue: homeViewModel)
+        _preferencesStore = StateObject(wrappedValue: environment.preferencesStore)
         _editorViewModel = StateObject(
             wrappedValue: EditorViewModel(
                 exportCoordinator: environment.exportCoordinator,
@@ -47,8 +49,10 @@ struct MouseLensApp: App {
                 coordinator: coordinator,
                 homeViewModel: homeViewModel,
                 editorViewModel: editorViewModel,
+                preferences: preferencesStore,
                 windowController: environment.windowController
             )
+            .mouseLensAppLocale(preferencesStore.appLanguage)
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -57,6 +61,7 @@ struct MouseLensApp: App {
                 preferences: environment.preferencesStore,
                 shortcutLabel: homeViewModel.recordingShortcutHint
             )
+            .mouseLensAppLocale(preferencesStore.appLanguage)
         }
 
         MenuBarExtra("MouseLens", systemImage: menuBarSymbolName) {
@@ -65,6 +70,7 @@ struct MouseLensApp: App {
                 viewModel: homeViewModel,
                 windowController: environment.windowController
             )
+            .mouseLensAppLocale(preferencesStore.appLanguage)
         }
     }
 
@@ -88,14 +94,18 @@ private struct MenuBarCaptureView: View {
     var body: some View {
         Text(viewModel.captureConfigurationSummary)
 
-        Button(viewModel.menuBarPrimaryActionTitle) {
+        Button {
             Task { await viewModel.handleRecordingToggleHotkey() }
+        } label: {
+            Text(LocalizedStringKey(viewModel.menuBarPrimaryActionTitle))
         }
         .disabled(viewModel.isRecordingActionDisabled)
 
         if case .recording(let session) = viewModel.recordingState {
-            Button(session.isPaused ? "Resume Recording" : "Pause Recording") {
+            Button {
                 viewModel.toggleRecordingPause()
+            } label: {
+                Text(LocalizedStringKey(session.isPaused ? "Resume Recording" : "Pause Recording"))
             }
         }
 
@@ -108,7 +118,7 @@ private struct MenuBarCaptureView: View {
                         viewModel.selectedCaptureTarget = target
                     } label: {
                         Label(
-                            target.label,
+                            LocalizedStringKey(target.label),
                             systemImage: viewModel.selectedCaptureTarget == target
                                 ? "checkmark"
                                 : captureTargetSymbol(for: target)
@@ -155,7 +165,7 @@ private struct MenuBarCaptureView: View {
                         viewModel.selectedAspectRatio = ratio
                     } label: {
                         Label(
-                            ratio.label,
+                            LocalizedStringKey(ratio.label),
                             systemImage: viewModel.selectedAspectRatio == ratio
                                 ? "checkmark"
                                 : "rectangle"
@@ -255,6 +265,7 @@ private struct RootView: View {
     @ObservedObject var coordinator: AppCoordinator
     @ObservedObject var homeViewModel: HomeViewModel
     @ObservedObject var editorViewModel: EditorViewModel
+    @ObservedObject var preferences: AppPreferencesStore
     let windowController: AppWindowController
 
     private var homeToolbarPresentationMode: HomeToolbarPresentationMode {
@@ -293,6 +304,7 @@ private struct RootView: View {
                         coordinator.open(project: project)
                     }
                 )
+                .mouseLensAppLocale(preferences.appLanguage)
             } else {
                 Color.clear
             }
@@ -364,6 +376,7 @@ private struct RootView: View {
                                         coordinator.open(project: project)
                                     }
                                 )
+                                .mouseLensAppLocale(preferences.appLanguage)
                             }
                         }
                     } else {
@@ -424,6 +437,17 @@ private struct RootView: View {
         let contentSize = FloatingRecordingNotesView.contentSize(for: notes)
         windowController.showRecordingNotesPanel(contentSize: contentSize) {
             FloatingRecordingNotesView(notes: notes)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func mouseLensAppLocale(_ language: AppLanguagePreference) -> some View {
+        if let localeIdentifier = language.localeIdentifier {
+            environment(\.locale, Locale(identifier: localeIdentifier))
+        } else {
+            self
         }
     }
 }

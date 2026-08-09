@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum CaptionPosition: String, Codable, Equatable, CaseIterable {
@@ -93,5 +94,51 @@ struct CaptionTrack: Codable, Equatable {
     func segments(overlappingStart start: TimeInterval, end: TimeInterval) -> [CaptionSegment] {
         guard end > start else { return [] }
         return segments.filter { $0.overlaps(start: start, end: end) }
+    }
+}
+
+struct CaptionLayout: Equatable {
+    private static let referenceContentShortSide: CGFloat = 900
+    private static let baseFontSize: CGFloat = 20
+
+    let text: String
+    let position: CGPoint
+    let maxTextWidth: CGFloat
+    let fontSize: CGFloat
+    let textColorHex: String
+    let backgroundOpacity: Double
+    let cornerRadius: CGFloat
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+
+    static func layout(
+        for segment: CaptionSegment,
+        style: CaptionStyle,
+        contentRect: CGRect
+    ) -> CaptionLayout {
+        let inset = max(contentRect.height * 0.08, 28)
+        let position: CGPoint
+        switch style.position {
+        case .top:
+            position = CGPoint(x: contentRect.midX, y: contentRect.minY + inset)
+        case .center:
+            position = CGPoint(x: contentRect.midX, y: contentRect.midY)
+        case .bottom:
+            position = CGPoint(x: contentRect.midX, y: contentRect.maxY - inset)
+        }
+        let shortSide = min(contentRect.width, contentRect.height)
+        let canvasScale = (shortSide / referenceContentShortSide).clamped(to: 0.9...2.4)
+
+        return CaptionLayout(
+            text: segment.text,
+            position: position,
+            maxTextWidth: max(contentRect.width * 0.72, 1),
+            fontSize: baseFontSize * CGFloat(style.fontScale) * canvasScale,
+            textColorHex: style.textColorHex,
+            backgroundOpacity: style.backgroundOpacity,
+            cornerRadius: 10,
+            horizontalPadding: 14,
+            verticalPadding: 8
+        )
     }
 }

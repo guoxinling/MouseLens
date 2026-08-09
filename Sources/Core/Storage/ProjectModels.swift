@@ -39,6 +39,69 @@ enum ProjectBackgroundStyle: String, Codable, CaseIterable {
     }
 }
 
+enum CursorStyle: String, CaseIterable, Codable {
+    case systemArrow
+    case pointerHand
+    case magicWand
+    case catPaw
+
+    var label: String {
+        switch self {
+        case .systemArrow:
+            "Default"
+        case .pointerHand:
+            "Pointer Hand"
+        case .magicWand:
+            "Magic Wand"
+        case .catPaw:
+            "Cat Paw"
+        }
+    }
+
+    var assetName: String {
+        switch self {
+        case .systemArrow:
+            "CursorSystemArrow"
+        case .pointerHand:
+            "CursorPointerHand"
+        case .magicWand:
+            "CursorMagicWand"
+        case .catPaw:
+            "CursorCatPaw"
+        }
+    }
+
+    var templateSize: CGSize {
+        switch self {
+        case .systemArrow:
+            CGSize(width: 44, height: 44)
+        case .pointerHand:
+            CGSize(width: 72, height: 72)
+        case .magicWand:
+            CGSize(width: 82, height: 82)
+        case .catPaw:
+            CGSize(width: 76, height: 76)
+        }
+    }
+
+    var hotspot: CGPoint {
+        switch self {
+        case .systemArrow:
+            CGPoint(x: 5, y: 5)
+        case .pointerHand:
+            CGPoint(x: 18, y: 11)
+        case .magicWand:
+            CGPoint(x: 13, y: 13)
+        case .catPaw:
+            CGPoint(x: 18, y: 11)
+        }
+    }
+
+    var requiresFlippedPreviewImageCorrection: Bool {
+        self != .systemArrow
+    }
+}
+
 enum PresenterBubblePosition: String, CaseIterable, Codable {
     case topLeft
     case topRight
@@ -253,6 +316,7 @@ struct ProjectStyle: Codable, Equatable {
     let clickEmphasis: Double
     let padding: Double
     let presenterBubbleStyle: PresenterBubbleStyle
+    let cursorStyle: CursorStyle
 
     var backgroundPreset: BackgroundPreset {
         BackgroundPresetCatalog.preset(id: backgroundPresetID)
@@ -272,6 +336,7 @@ struct ProjectStyle: Codable, Equatable {
         case clickEmphasis
         case padding
         case presenterBubbleStyle
+        case cursorStyle
     }
 
     init(
@@ -282,7 +347,8 @@ struct ProjectStyle: Codable, Equatable {
         followStrength: Double,
         clickEmphasis: Double,
         padding: Double,
-        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue
+        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue,
+        cursorStyle: CursorStyle = .systemArrow
     ) {
         self.aspectRatio = aspectRatio
         self.backgroundPresetID = backgroundPresetID
@@ -292,6 +358,7 @@ struct ProjectStyle: Codable, Equatable {
         self.clickEmphasis = clickEmphasis
         self.padding = padding
         self.presenterBubbleStyle = presenterBubbleStyle
+        self.cursorStyle = cursorStyle
     }
 
     init(
@@ -302,7 +369,8 @@ struct ProjectStyle: Codable, Equatable {
         followStrength: Double,
         clickEmphasis: Double,
         padding: Double,
-        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue
+        presenterBubbleStyle: PresenterBubbleStyle = .defaultValue,
+        cursorStyle: CursorStyle = .systemArrow
     ) {
         self.init(
             aspectRatio: aspectRatio,
@@ -312,7 +380,8 @@ struct ProjectStyle: Codable, Equatable {
             followStrength: followStrength,
             clickEmphasis: clickEmphasis,
             padding: padding,
-            presenterBubbleStyle: presenterBubbleStyle
+            presenterBubbleStyle: presenterBubbleStyle,
+            cursorStyle: cursorStyle
         )
     }
 
@@ -338,7 +407,8 @@ struct ProjectStyle: Codable, Equatable {
             presenterBubbleStyle: try container.decodeIfPresent(
                 PresenterBubbleStyle.self,
                 forKey: .presenterBubbleStyle
-            ) ?? .defaultValue
+            ) ?? .defaultValue,
+            cursorStyle: try container.decodeIfPresent(CursorStyle.self, forKey: .cursorStyle) ?? .systemArrow
         )
     }
 
@@ -352,6 +422,7 @@ struct ProjectStyle: Codable, Equatable {
         try container.encode(clickEmphasis, forKey: .clickEmphasis)
         try container.encode(padding, forKey: .padding)
         try container.encode(presenterBubbleStyle, forKey: .presenterBubbleStyle)
+        try container.encode(cursorStyle, forKey: .cursorStyle)
     }
 }
 

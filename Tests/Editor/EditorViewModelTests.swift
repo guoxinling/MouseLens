@@ -310,6 +310,17 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedBackgroundPresetID, "horizon-glow")
     }
 
+    func testChangingCursorStyleUpdatesDraftProjectStyle() {
+        let viewModel = makeViewModel()
+        let project = makeProject(followStrength: 0.65, aspectRatio: .landscape)
+
+        viewModel.configure(for: project)
+        viewModel.updateCursorStyle(.catPaw)
+
+        XCTAssertEqual(viewModel.project?.style.cursorStyle, .catPaw)
+        XCTAssertEqual(viewModel.selectedCursorStyle, .catPaw)
+    }
+
     func testConfiguringEditorLoadsPresenterBubbleState() {
         let project = makeProjectWithPresenterBubble()
         let viewModel = makeViewModel()

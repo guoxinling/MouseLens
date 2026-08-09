@@ -247,6 +247,10 @@ struct EditorView: View {
                     manualZoomInspector(project: project)
                 }
 
+                inspectorSection(title: "Cursor", systemImage: "cursorarrow") {
+                    cursorStyleGrid
+                }
+
                 if project.presenterMedia != nil {
                     inspectorSection(title: "Presenter", systemImage: "person.crop.circle") {
                         presenterInspector
@@ -570,6 +574,27 @@ struct EditorView: View {
                     BackgroundSwatch(
                         preset: preset,
                         isSelected: viewModel.selectedBackgroundPresetID == preset.id
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var cursorStyleGrid: some View {
+        let columns = [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
+
+        return LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(CursorStyle.allCases, id: \.self) { style in
+                Button {
+                    viewModel.updateCursorStyle(style)
+                } label: {
+                    CursorStyleSwatch(
+                        style: style,
+                        isSelected: viewModel.selectedCursorStyle == style
                     )
                 }
                 .buttonStyle(.plain)
@@ -1663,6 +1688,70 @@ private struct BackgroundSwatch: View {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(isSelected ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.04))
         )
+    }
+}
+
+private struct CursorStyleSwatch: View {
+    let style: CursorStyle
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.16),
+                                Color.white.opacity(0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                cursorPreview
+                    .frame(width: 38, height: 38)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white, AppTheme.accent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(7)
+                }
+            }
+            .frame(height: 58)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isSelected ? AppTheme.accent : Color.white.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+            )
+
+            Text(LocalizedStringKey(style.label))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isSelected ? .white : AppTheme.mutedText)
+                .lineLimit(1)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(isSelected ? AppTheme.accent.opacity(0.18) : Color.white.opacity(0.04))
+        )
+    }
+
+    @ViewBuilder
+    private var cursorPreview: some View {
+        if style == .systemArrow {
+            Image(systemName: "cursorarrow")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+        } else {
+            Image(style.assetName)
+                .resizable()
+                .scaledToFit()
+                .shadow(color: .black.opacity(0.24), radius: 3, y: 2)
+        }
     }
 }
 

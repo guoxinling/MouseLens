@@ -93,6 +93,84 @@ final class SourceCropPlannerTests: XCTestCase {
         XCTAssertLessThan(pixel.blue, 0.28)
     }
 
+    func testMP4ExportBurnsEnabledCaptionOverlay() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let outputURL = directory.appendingPathComponent("output.mp4")
+        try Self.writeSolidVideo(to: sourceURL, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+
+        let captionTrack = CaptionTrack(
+            isEnabled: true,
+            localeIdentifier: "en-US",
+            segments: [
+                CaptionSegment(start: 0, end: 2, text: "Caption")
+            ],
+            style: CaptionStyle(position: .bottom, fontScale: 1, textColorHex: "#FFFFFF", backgroundOpacity: 1)
+        )
+        let project = Self.project(
+            sourceVideoURL: sourceURL,
+            style: .testValue(replacingPresenterBubbleStyleWith: .defaultValue),
+            presenterMedia: nil,
+            captionTrack: captionTrack
+        )
+        let configuration = ExportConfiguration(
+            format: .mp4,
+            resolution: .p480,
+            frameRate: .fps15,
+            quality: .small,
+            includesCursor: false,
+            includesClickFeedback: false
+        )
+
+        _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
+
+        let frame = try Self.firstVideoFrame(from: outputURL)
+        let renderSize = configuration.renderSize(for: .landscape)
+        let layout = CaptionLayout.layout(
+            for: captionTrack.segments[0],
+            style: captionTrack.style,
+            contentRect: RenderLayout(renderSize: renderSize, padding: project.style.padding).contentRect
+        )
+        let pixel = try Self.pixel(in: frame, atTopOriginPoint: layout.position)
+        XCTAssertLessThan(pixel.blue, 0.55)
+    }
+
+    func testGIFExportBurnsEnabledCaptionOverlay() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        let sourceURL = directory.appendingPathComponent("source.mp4")
+        let outputURL = directory.appendingPathComponent("output.gif")
+        try Self.writeSolidVideo(to: sourceURL, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+
+        let captionTrack = CaptionTrack(
+            isEnabled: true,
+            localeIdentifier: "en-US",
+            segments: [
+                CaptionSegment(start: 0, end: 2, text: "Caption")
+            ],
+            style: CaptionStyle(position: .bottom, fontScale: 1, textColorHex: "#FFFFFF", backgroundOpacity: 1)
+        )
+        let project = Self.project(
+            sourceVideoURL: sourceURL,
+            style: .testValue(replacingPresenterBubbleStyleWith: .defaultValue),
+            presenterMedia: nil,
+            captionTrack: captionTrack
+        )
+        var configuration = ExportConfiguration.recommended(for: .landscape, format: .gif)
+        configuration.resolution = .p720
+
+        _ = try await VideoRenderer().renderVideo(for: project, configuration: configuration, destinationURL: outputURL)
+
+        let frame = try Self.firstGIFFrame(from: outputURL)
+        let renderSize = configuration.renderSize(for: .landscape)
+        let layout = CaptionLayout.layout(
+            for: captionTrack.segments[0],
+            style: captionTrack.style,
+            contentRect: RenderLayout(renderSize: renderSize, padding: project.style.padding).contentRect
+        )
+        let pixel = try Self.pixel(in: frame, atTopOriginPoint: layout.position)
+        XCTAssertLessThan(pixel.blue, 0.55)
+    }
+
     func testExportFallsBackWhenPresenterFrameCannotDecode() async throws {
         let directory = try Self.makeTemporaryDirectory()
         let sourceURL = directory.appendingPathComponent("source.mp4")
@@ -654,7 +732,7 @@ final class SourceCropPlannerTests: XCTestCase {
         )
     }
 
-    func testFullscreenBrowserWindowCursorVisualCalibrationAppliesSmallUpwardOffset() {
+    func testFullscreenBrowserWindowCursorVisualCalibrationDoesNotApplyVisualOffset() {
         let offset = CursorVisualCalibrationPolicy.offset(
             captureTarget: .window,
             sourceSize: CGSize(width: 2940, height: 1670),
@@ -662,7 +740,7 @@ final class SourceCropPlannerTests: XCTestCase {
         )
 
         XCTAssertEqual(offset.width, 0, accuracy: 0.0001)
-        XCTAssertEqual(offset.height, -3, accuracy: 0.0001)
+        XCTAssertEqual(offset.height, 0, accuracy: 0.0001)
     }
 
     func testCursorVisualCalibrationDoesNotAffectScreenOrOrdinaryWindow() {
@@ -702,7 +780,8 @@ final class SourceCropPlannerTests: XCTestCase {
     private static func project(
         sourceVideoURL: URL = URL(fileURLWithPath: "/tmp/source.mov"),
         style: ProjectStyle,
-        presenterMedia: PresenterMedia?
+        presenterMedia: PresenterMedia?,
+        captionTrack: CaptionTrack? = nil
     ) -> RecordingProject {
         RecordingProject(
             id: UUID(),
@@ -715,7 +794,8 @@ final class SourceCropPlannerTests: XCTestCase {
             events: [],
             cameraKeyframes: [CameraKeyframe(timestamp: 0, focus: .center, zoom: 1)],
             style: style,
-            presenterMedia: presenterMedia
+            presenterMedia: presenterMedia,
+            captionTrack: captionTrack
         )
     }
 

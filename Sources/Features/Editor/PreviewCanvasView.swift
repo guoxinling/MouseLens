@@ -370,6 +370,7 @@ struct PreviewCanvasView: View {
                         realtimeGeometry: previewGeometry,
                         contentCornerRadius: cornerRadius,
                         showsReconstructedCursor: project.reconstructsCursor,
+                        cursorStyle: project.style.cursorStyle,
                         presenterVideoURL: presenterVideoURL,
                         presenterSeekTime: max(sourceTimestamp + (project.presenterMedia?.renderOffset ?? 0), 0),
                         presenterLayout: presenterLayout.frame.isEmpty ? nil : presenterLayout,
@@ -732,32 +733,22 @@ private struct CaptionPreviewOverlay: View {
     let contentRect: CGRect
 
     var body: some View {
-        Text(segment.text)
-            .font(.system(size: 20 * style.fontScale, weight: .semibold))
-            .foregroundStyle(Color(hex: style.textColorHex) ?? .white)
+        let layout = CaptionLayout.layout(for: segment, style: style, contentRect: contentRect)
+
+        Text(layout.text)
+            .font(.system(size: layout.fontSize, weight: .semibold))
+            .foregroundStyle(Color(hex: layout.textColorHex) ?? .white)
             .multilineTextAlignment(.center)
             .lineLimit(3)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, layout.horizontalPadding)
+            .padding(.vertical, layout.verticalPadding)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.black.opacity(style.backgroundOpacity))
+                RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
+                    .fill(.black.opacity(layout.backgroundOpacity))
             )
-            .frame(width: max(contentRect.width * 0.72, 1))
-            .position(captionPosition)
+            .frame(width: layout.maxTextWidth)
+            .position(layout.position)
             .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
-    }
-
-    private var captionPosition: CGPoint {
-        let inset = max(contentRect.height * 0.08, 28)
-        switch style.position {
-        case .top:
-            return CGPoint(x: contentRect.midX, y: contentRect.minY + inset)
-        case .center:
-            return CGPoint(x: contentRect.midX, y: contentRect.midY)
-        case .bottom:
-            return CGPoint(x: contentRect.midX, y: contentRect.maxY - inset)
-        }
     }
 }
 
@@ -791,6 +782,7 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
     var realtimeGeometry: RealtimePreviewGeometry?
     var contentCornerRadius: CGFloat = 0
     var showsReconstructedCursor = false
+    var cursorStyle: CursorStyle = .systemArrow
     var presenterVideoURL: URL?
     var presenterSeekTime: TimeInterval = 0
     var presenterLayout: PresenterOverlayLayout?
@@ -820,7 +812,8 @@ private struct PreviewVideoPlayerView: NSViewRepresentable {
             frameSnapshot: frameSnapshot,
             geometry: realtimeGeometry,
             cornerRadius: contentCornerRadius,
-            showsCursor: showsReconstructedCursor
+            showsCursor: showsReconstructedCursor,
+            cursorStyle: cursorStyle
         )
         context.coordinator.presenterRenderOffset = presenterSeekTime - seekTime
         nsView.updatePresenterOverlay(
@@ -1135,7 +1128,8 @@ private final class StablePlayerContainerView: NSView {
         frameSnapshot: FrameSnapshot?,
         geometry: RealtimePreviewGeometry?,
         cornerRadius: CGFloat,
-        showsCursor: Bool
+        showsCursor: Bool,
+        cursorStyle: CursorStyle
     ) {
         realtimeGeometry = geometry
         contentCornerRadius = max(cornerRadius, 0)
@@ -1152,6 +1146,7 @@ private final class StablePlayerContainerView: NSView {
         cursorOverlayView.cameraFocus = frameSnapshot?.focus
         cursorOverlayView.geometry = geometry
         cursorOverlayView.showsCursor = showsCursor
+        cursorOverlayView.cursorStyle = cursorStyle
         cursorOverlayView.showsDebugOverlay = ProcessInfo.processInfo.environment["MOUSELENS_DEBUG_COORDINATES"] == "1"
         cursorOverlayView.needsDisplay = true
         needsLayout = true
@@ -1571,6 +1566,7 @@ private final class CursorOverlayView: NSView {
     var cameraFocus: NormalizedPoint?
     var geometry: RealtimePreviewGeometry?
     var showsCursor = false
+    var cursorStyle: CursorStyle = .systemArrow
     var showsDebugOverlay = false
 
     override var isFlipped: Bool { true }
@@ -1631,8 +1627,50 @@ private final class CursorOverlayView: NSView {
     }
 
     private func drawCursor(at point: CGPoint) {
-        let origin = CursorGeometry.origin(forTip: point, scale: 1)
-        let transform = AffineTransform(translationByX: origin.x, byY: origin.y)
+        let scale = geometry.map { CursorVisualMetrics.scale(for: cursorStyle, contentRect: $0.contentRect) } ?? 1
+        guard cursorStyle == .systemArrow else {
+            drawImageCursor(at: point, scale: scale)
+            return
+        }
+
+        drawSystemCursor(at: point, scale: scale)
+    }
+
+    private func drawImageCursor(at point: CGPoint, scale: CGFloat) {
+        guard let image = NSImage(named: cursorStyle.assetName) else {
+            drawSystemCursor(at: point, scale: scale)
+            return
+        }
+
+        let origin = CursorGeometry.origin(forTip: point, scale: scale, style: cursorStyle)
+        let rect = CGRect(
+            x: origin.x * scale,
+            y: origin.y * scale,
+            width: cursorStyle.templateSize.width * scale,
+            height: cursorStyle.templateSize.height * scale
+        )
+
+        NSGraphicsContext.current?.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.26)
+        shadow.shadowOffset = NSSize(width: 0, height: 1)
+        shadow.shadowBlurRadius = 4
+        shadow.set()
+        image.draw(
+            in: rect,
+            from: CGRect(origin: .zero, size: image.size),
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: cursorStyle.requiresFlippedPreviewImageCorrection,
+            hints: nil
+        )
+        NSGraphicsContext.current?.restoreGraphicsState()
+    }
+
+    private func drawSystemCursor(at point: CGPoint, scale: CGFloat = 1) {
+        let origin = CursorGeometry.origin(forTip: point, scale: scale)
+        var transform = AffineTransform(translationByX: origin.x * scale, byY: origin.y * scale)
+        transform.scale(scale)
         let path = NSBezierPath()
         path.move(to: CursorGeometry.hotspot)
         path.line(to: CGPoint(x: 5, y: 35))

@@ -512,35 +512,49 @@ enum CursorGeometry {
     )
 
     static func origin(forTip tip: CGPoint, scale: CGFloat) -> CGPoint {
+        origin(forTip: tip, scale: scale, style: .systemArrow)
+    }
+
+    static func origin(forTip tip: CGPoint, scale: CGFloat, style: CursorStyle) -> CGPoint {
         CGPoint(
-            x: (tip.x / max(scale, 0.0001)) - hotspot.x,
-            y: (tip.y / max(scale, 0.0001)) - hotspot.y
+            x: (tip.x / max(scale, 0.0001)) - style.hotspot.x,
+            y: (tip.y / max(scale, 0.0001)) - style.hotspot.y
         )
     }
 
     static func coreImageTemplateOrigin(forTip tip: CGPoint, scale: CGFloat) -> CGPoint {
+        coreImageTemplateOrigin(forTip: tip, scale: scale, style: .systemArrow)
+    }
+
+    static func coreImageTemplateOrigin(forTip tip: CGPoint, scale: CGFloat, style: CursorStyle) -> CGPoint {
+        let hotspot = coreImageHotspot(for: style)
+        return CGPoint(
+            x: tip.x - (hotspot.x * scale),
+            y: tip.y - (hotspot.y * scale)
+        )
+    }
+
+    static func coreImageHotspot(for style: CursorStyle) -> CGPoint {
         CGPoint(
-            x: tip.x - (coreImageHotspot.x * scale),
-            y: tip.y - (coreImageHotspot.y * scale)
+            x: style.hotspot.x,
+            y: style.templateSize.height - style.hotspot.y
         )
     }
 }
 
+enum CursorVisualMetrics {
+    private static let referenceContentShortSide: CGFloat = 810
+
+    static func scale(for _: CursorStyle, contentRect: CGRect) -> CGFloat {
+        let shortSide = min(contentRect.width, contentRect.height)
+        guard shortSide > 0 else { return 1 }
+        return (shortSide / referenceContentShortSide).clamped(to: 0.52...2.8)
+    }
+}
+
 enum CursorVisualCalibrationPolicy {
-    private static let fullscreenBrowserWindowYOffset: CGFloat = -3
-
     static func offset(captureTarget: CaptureTarget, sourceSize: CGSize, sourceExtent: CGRect) -> CGSize {
-        guard captureTarget == .window else { return .zero }
-        guard sourceSize.width > 0, sourceSize.height > 0 else { return .zero }
-        guard sourceExtent.width > 0, sourceExtent.height > 0 else { return .zero }
-
-        let widthGap = sourceSize.width - sourceExtent.width
-        guard widthGap >= 80,
-              abs(sourceSize.height - sourceExtent.height) <= 2 else {
-            return .zero
-        }
-
-        return CGSize(width: 0, height: fullscreenBrowserWindowYOffset)
+        .zero
     }
 
     static func calibratedPoint(
@@ -1121,7 +1135,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
     private let previewVideoLongestSide: CGFloat = 960
     private let sourceFrameSeekTolerance = CMTime(value: 1, timescale: 12)
     private let renderColorSpace = CGColorSpaceCreateDeviceRGB()
-    private lazy var cursorTemplateImage: CIImage = makeCursorTemplateImage()
+    private var cursorTemplateImages: [CursorStyle: CIImage] = [:]
 
     func renderVideo(for project: RecordingProject, preset: ExportPreset, destinationURL: URL) async throws -> URL {
         guard let sourceURL = project.sourceVideoURL, FileManager.default.fileExists(atPath: sourceURL.path) else {
@@ -1312,8 +1326,14 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
                     plan: presenterPlan,
                     layout: preparedAssets.layout
                 )
+                let frameWithCaptions = applyCaptionOverlay(
+                    to: frameWithPresenter,
+                    project: project,
+                    timestamp: clampedTimestamp,
+                    layout: preparedAssets.layout
+                )
 
-                guard let outputImage = ciContext.createCGImage(frameWithPresenter, from: preparedAssets.layout.fullRect) else {
+                guard let outputImage = ciContext.createCGImage(frameWithCaptions, from: preparedAssets.layout.fullRect) else {
                     continuation.resume(throwing: VideoRendererError.unableToCreateContext)
                     return
                 }
@@ -2087,6 +2107,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             reconstructsCursor: project.reconstructsCursor,
             includesCursor: includesCursor,
             includesClickFeedback: includesClickFeedback,
+            cursorStyle: project.style.cursorStyle,
             layout: preparedAssets.layout,
             sourceExtent: effectiveSourceExtent,
             cropRect: cropRect,
@@ -2126,13 +2147,20 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             includesClickFeedback: includesClickFeedback
         )
 
-        return applyPresenterOverlay(
+        let frameWithPresenter = applyPresenterOverlay(
             to: composedFrame,
             presenterFrame: presenterFrame,
             plan: presenterPlan,
             layout: preparedAssets.layout
         )
-        .cropped(to: preparedAssets.layout.fullRect)
+        let frameWithCaptions = applyCaptionOverlay(
+            to: frameWithPresenter,
+            project: project,
+            timestamp: timestamp,
+            layout: preparedAssets.layout
+        )
+
+        return frameWithCaptions.cropped(to: preparedAssets.layout.fullRect)
     }
 
     private func presenterAnchorRect(
@@ -2231,6 +2259,136 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
             .cropped(to: layout.fullRect)
 
         return clippedPresenter.composited(over: shadow.composited(over: image))
+    }
+
+    private func applyCaptionOverlay(
+        to image: CIImage,
+        project: RecordingProject,
+        timestamp: TimeInterval,
+        layout: RenderLayout
+    ) -> CIImage {
+        guard
+            let captionTrack = project.captionTrack,
+            captionTrack.isEnabled,
+            let segment = captionTrack.segment(at: timestamp)
+        else {
+            return image
+        }
+
+        let captionLayout = CaptionLayout.layout(
+            for: segment,
+            style: captionTrack.style,
+            contentRect: layout.contentRect
+        )
+        let overlay = makeCaptionOverlayImage(layout: captionLayout, renderLayout: layout)
+        return overlay.composited(over: image).cropped(to: layout.fullRect)
+    }
+
+    private func makeCaptionOverlayImage(layout captionLayout: CaptionLayout, renderLayout: RenderLayout) -> CIImage {
+        let width = max(Int(renderLayout.renderSize.width.rounded(.up)), 1)
+        let height = max(Int(renderLayout.renderSize.height.rounded(.up)), 1)
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return CIImage(color: .clear).cropped(to: renderLayout.fullRect)
+        }
+
+        context.clear(renderLayout.fullRect)
+
+        let font = NSFont.systemFont(ofSize: captionLayout.fontSize, weight: .semibold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+
+        let foreground = nsColor(hex: captionLayout.textColorHex) ?? .white
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: foreground,
+            .paragraphStyle: paragraph
+        ]
+        let attributedText = NSAttributedString(string: captionLayout.text, attributes: attributes)
+        let lineHeight = max(ceil(font.ascender - font.descender + font.leading), captionLayout.fontSize)
+        let maxTextSize = CGSize(
+            width: captionLayout.maxTextWidth,
+            height: lineHeight * 3
+        )
+        let measuredTextRect = attributedText.boundingRect(
+            with: maxTextSize,
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let measuredWidth = ceil(measuredTextRect.width)
+        let measuredHeight = ceil(measuredTextRect.height)
+        let textSize = CGSize(
+            width: min(max(measuredWidth, font.pointSize), captionLayout.maxTextWidth),
+            height: min(max(measuredHeight, lineHeight), maxTextSize.height)
+        )
+        let paddedWidth = textSize.width + (captionLayout.horizontalPadding * 2)
+        let maxBackgroundWidth = captionLayout.maxTextWidth + (captionLayout.horizontalPadding * 2)
+        let backgroundSize = CGSize(
+            width: min(paddedWidth, maxBackgroundWidth),
+            height: textSize.height + (captionLayout.verticalPadding * 2)
+        )
+        let center = CGPoint(
+            x: captionLayout.position.x,
+            y: renderLayout.fullRect.height - captionLayout.position.y
+        )
+        let backgroundRect = CGRect(
+            x: center.x - (backgroundSize.width / 2),
+            y: center.y - (backgroundSize.height / 2),
+            width: backgroundSize.width,
+            height: backgroundSize.height
+        ).integral
+        let textRect = CGRect(
+            x: backgroundRect.minX + captionLayout.horizontalPadding,
+            y: backgroundRect.minY + captionLayout.verticalPadding,
+            width: max(backgroundRect.width - (captionLayout.horizontalPadding * 2), 1),
+            height: max(backgroundRect.height - (captionLayout.verticalPadding * 2), 1)
+        )
+
+        context.saveGState()
+        context.setFillColor(CGColor(gray: 0, alpha: captionLayout.backgroundOpacity))
+        context.addPath(CGPath(
+            roundedRect: backgroundRect,
+            cornerWidth: captionLayout.cornerRadius,
+            cornerHeight: captionLayout.cornerRadius,
+            transform: nil
+        ))
+        context.fillPath()
+        context.restoreGState()
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        attributedText.draw(with: textRect, options: [.usesLineFragmentOrigin, .usesFontLeading])
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let image = context.makeImage() else {
+            return CIImage(color: .clear).cropped(to: renderLayout.fullRect)
+        }
+        return CIImage(cgImage: image).cropped(to: renderLayout.fullRect)
+    }
+
+    private func nsColor(hex: String) -> NSColor? {
+        var normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("#") {
+            normalized.removeFirst()
+        }
+        guard normalized.count == 6, let value = Int(normalized, radix: 16) else {
+            return nil
+        }
+
+        return NSColor(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 
     private func makeBackgroundImage(
@@ -2411,6 +2569,7 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         reconstructsCursor: Bool,
         includesCursor: Bool,
         includesClickFeedback: Bool,
+        cursorStyle: CursorStyle,
         layout: RenderLayout,
         sourceExtent: CGRect,
         cropRect: CGRect,
@@ -2461,13 +2620,13 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
 
         guard includesCursor else { return layeredImage }
 
-        let baseScale = (min(layout.contentRect.width, layout.contentRect.height) / 1050).clamped(to: 0.78...1.08)
+        let baseScale = CursorVisualMetrics.scale(for: cursorStyle, contentRect: layout.contentRect)
         let scale = baseScale * (1 + (pointerSnapshot.clickProgress * 0.05))
-        let origin = CursorGeometry.coreImageTemplateOrigin(forTip: ciPoint, scale: scale)
+        let origin = CursorGeometry.coreImageTemplateOrigin(forTip: ciPoint, scale: scale, style: cursorStyle)
         let transform = CGAffineTransform(translationX: origin.x, y: origin.y)
             .scaledBy(x: scale, y: scale)
 
-        let cursor = cursorTemplateImage
+        let cursor = cursorTemplateImage(for: cursorStyle)
             .transformed(by: transform)
             .cropped(to: layout.fullRect)
 
@@ -2482,7 +2641,38 @@ final class VideoRenderer: ProjectPreviewRendering, @unchecked Sendable {
         return buffer
     }
 
-    private func makeCursorTemplateImage() -> CIImage {
+    private func cursorTemplateImage(for style: CursorStyle) -> CIImage {
+        if let cached = cursorTemplateImages[style] {
+            return cached
+        }
+
+        let image = makeCursorTemplateImage(for: style)
+        cursorTemplateImages[style] = image
+        return image
+    }
+
+    private func makeCursorTemplateImage(for style: CursorStyle) -> CIImage {
+        guard style != .systemArrow else {
+            return makeSystemCursorTemplateImage()
+        }
+
+        guard
+            let nsImage = NSImage(named: style.assetName),
+            let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
+            return makeSystemCursorTemplateImage()
+        }
+
+        return CIImage(cgImage: cgImage)
+            .transformed(
+                by: CGAffineTransform(
+                    scaleX: style.templateSize.width / max(CGFloat(cgImage.width), 1),
+                    y: style.templateSize.height / max(CGFloat(cgImage.height), 1)
+                )
+            )
+    }
+
+    private func makeSystemCursorTemplateImage() -> CIImage {
         let size = CursorGeometry.templateSize
         let width = Int(size.width)
         let height = Int(size.height)

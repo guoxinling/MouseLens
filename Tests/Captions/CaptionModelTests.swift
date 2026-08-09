@@ -2,6 +2,31 @@ import XCTest
 @testable import MouseLens
 
 final class CaptionModelTests: XCTestCase {
+    func testCaptionLayoutMatchesPreviewPositionRules() {
+        let contentRect = CGRect(x: 80, y: 40, width: 1600, height: 900)
+        let segment = CaptionSegment(start: 1, end: 2, text: "Shared caption")
+        let style = CaptionStyle(position: .bottom, fontScale: 1.25, textColorHex: "#FFFFFF", backgroundOpacity: 0.62)
+
+        let layout = CaptionLayout.layout(for: segment, style: style, contentRect: contentRect)
+
+        XCTAssertEqual(layout.text, "Shared caption")
+        XCTAssertEqual(layout.fontSize, 25, accuracy: 0.0001)
+        XCTAssertEqual(layout.maxTextWidth, contentRect.width * 0.72, accuracy: 0.0001)
+        XCTAssertEqual(layout.position.x, contentRect.midX, accuracy: 0.0001)
+        XCTAssertEqual(layout.position.y, contentRect.maxY - max(contentRect.height * 0.08, 28), accuracy: 0.0001)
+        XCTAssertEqual(layout.backgroundOpacity, 0.62, accuracy: 0.0001)
+    }
+
+    func testCaptionLayoutScalesFontForLargeExportCanvas() {
+        let contentRect = CGRect(x: 0, y: 0, width: 3840, height: 2160)
+        let segment = CaptionSegment(start: 1, end: 2, text: "Large export caption")
+        let style = CaptionStyle(position: .bottom, fontScale: 1, textColorHex: "#FFFFFF", backgroundOpacity: 0.62)
+
+        let layout = CaptionLayout.layout(for: segment, style: style, contentRect: contentRect)
+
+        XCTAssertEqual(layout.fontSize, 48, accuracy: 0.0001)
+    }
+
     func testCaptionTrackFindsSegmentAtTimestamp() {
         let firstID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let secondID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!

@@ -34,6 +34,7 @@ final class EditorViewModel: ObservableObject {
     @Published var selectedBackgroundPresetID = BackgroundPresetCatalog.defaultPresetID {
         didSet { handleStyleChange(updateExportPreset: false) }
     }
+    @Published private(set) var selectedCursorStyle: CursorStyle = .systemArrow
     @Published var selectedAspectRatio: ProjectAspectRatio = .landscape {
         didSet { handleStyleChange(updateExportPreset: true) }
     }
@@ -125,6 +126,7 @@ final class EditorViewModel: ObservableObject {
         padding = project.style.padding
         cornerRadius = project.style.cornerRadius
         selectedBackgroundPresetID = project.style.backgroundPresetID
+        selectedCursorStyle = project.style.cursorStyle
         selectedAspectRatio = project.style.aspectRatio
         trimStart = project.effectiveTrimRange.start
         trimEnd = project.effectiveTrimRange.end
@@ -152,6 +154,35 @@ final class EditorViewModel: ObservableObject {
         previewTimestamp = defaultPreviewTimestamp(for: project)
         isApplyingConfiguration = false
         schedulePreview(for: project)
+    }
+
+    func updateCursorStyle(_ cursorStyle: CursorStyle) {
+        guard !isApplyingConfiguration, let workingProject = project ?? sourceProject else { return }
+        selectedCursorStyle = cursorStyle
+
+        let style = ProjectStyle(
+            aspectRatio: workingProject.style.aspectRatio,
+            backgroundPresetID: workingProject.style.backgroundPresetID,
+            cornerRadius: workingProject.style.cornerRadius,
+            shadowRadius: workingProject.style.shadowRadius,
+            followStrength: workingProject.style.followStrength,
+            clickEmphasis: workingProject.style.clickEmphasis,
+            padding: workingProject.style.padding,
+            presenterBubbleStyle: workingProject.style.presenterBubbleStyle,
+            cursorStyle: cursorStyle
+        )
+        let updatedProject = workingProject.updating(
+            style: style,
+            cameraKeyframes: workingProject.cameraKeyframes,
+            trimRange: currentTrimRange,
+            clipSegments: currentClipSegments
+        )
+
+        project = updatedProject
+        exportState = .idle
+        prefersStaticPreview = updatedProject.sourceVideoURL != nil
+        scheduleSave(for: updatedProject)
+        schedulePreview(for: updatedProject)
     }
 
     func export() async {
@@ -991,7 +1022,8 @@ final class EditorViewModel: ObservableObject {
             followStrength: motionSettings.followStrength,
             clickEmphasis: motionSettings.clickEmphasis,
             padding: padding,
-            presenterBubbleStyle: currentProject.style.presenterBubbleStyle
+            presenterBubbleStyle: currentProject.style.presenterBubbleStyle,
+            cursorStyle: currentProject.style.cursorStyle
         )
 
         let keyframes = cameraPlanEngine.makePlan(
@@ -1325,7 +1357,8 @@ final class EditorViewModel: ObservableObject {
             followStrength: workingProject.style.followStrength,
             clickEmphasis: workingProject.style.clickEmphasis,
             padding: workingProject.style.padding,
-            presenterBubbleStyle: updatedStyle
+            presenterBubbleStyle: updatedStyle,
+            cursorStyle: workingProject.style.cursorStyle
         )
         let updatedProject = workingProject.updating(
             style: projectStyle,

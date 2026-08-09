@@ -18,6 +18,7 @@
 		236EC576727DAA9201B8ECE3 /* BackgroundRenderResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB16B447BD77AEBAFA3DACA /* BackgroundRenderResolverTests.swift */; };
 		26CEDE584F6AA386CC4D168E /* RecordingHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CCDED56CFDDCA170963A2C /* RecordingHUDView.swift */; };
 		285A3C19D987AF43C68305C0 /* PresenterOverlayGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A7603BA6D9165B20F1D5E3 /* PresenterOverlayGeometryTests.swift */; };
+		2E4E4F18B63048A3A3E15D51 /* CursorStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D29FC870E5D84F7B9FB3E5A8 /* CursorStyleTests.swift */; };
 		32F023939D47F1EBDA472F23 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD12DBA90338B67660F8A78 /* AppEnvironment.swift */; };
 		35933D9AD6426C73850DA380 /* InputModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301799F17CA05B8E594B88EE /* InputModels.swift */; };
 		374D050556033AAF573F9EB4 /* GIFEncodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F8AF9BF1931E94399BCFE78 /* GIFEncodingTests.swift */; };
@@ -127,6 +128,7 @@
 		CABA3DFA892793AC5E2A8B05 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		CE6DF292708123151C858EE1 /* MouseLensTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouseLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D92E933D7DB3407EA9D77750 /* ProjectModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectModels.swift; sourceTree = "<group>"; };
+		D29FC870E5D84F7B9FB3E5A8 /* CursorStyleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorStyleTests.swift; sourceTree = "<group>"; };
 		DB4466EF4EEBBA8CCB3464A3 /* ProjectStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStoreTests.swift; sourceTree = "<group>"; };
 		DC15830FA133642208BAA6D8 /* PresenterOverlayGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresenterOverlayGeometry.swift; sourceTree = "<group>"; };
 		E43C0583E25B59D88E9C5A8D /* MouseLens.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MouseLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -425,6 +427,7 @@
 			isa = PBXGroup;
 			children = (
 				3AB16B447BD77AEBAFA3DACA /* BackgroundRenderResolverTests.swift */,
+				D29FC870E5D84F7B9FB3E5A8 /* CursorStyleTests.swift */,
 				17EFCB5BFF827F3320B0955B /* ExportConfigurationTests.swift */,
 				21087FB0F3033597E0FF88A9 /* ExportFilenameTests.swift */,
 				B30E0CB663183D7EE68BED15 /* ExportPresetTests.swift */,
@@ -578,6 +581,7 @@
 				F3DA86BB86CB67C5BFE2AAAF /* CameraPlanEngineTests.swift in Sources */,
 				5E9ECF91546C64A9290CE111 /* CaptionModelTests.swift in Sources */,
 				B00D9006C826102CDF92347B /* CaptureSizePolicyTests.swift in Sources */,
+				2E4E4F18B63048A3A3E15D51 /* CursorStyleTests.swift in Sources */,
 				6F49A6350B44E5F2413BE93A /* EditorViewModelTests.swift in Sources */,
 				097888CA419F8AFC1DFD6E83 /* ExportConfigurationTests.swift in Sources */,
 				F522062460B28B6FD6B6AC5E /* ExportFilenameTests.swift in Sources */,

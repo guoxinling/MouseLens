@@ -458,13 +458,20 @@ enum GIFFrameEncoder {
         }
 
         let fileProperties: [CFString: Any] = [
+            kCGImagePropertyDepth: 8,
+            kCGImageDestinationLossyCompressionQuality: 1.0,
+            kCGImageDestinationOptimizeColorForSharing: true,
             kCGImagePropertyGIFDictionary: [
-                kCGImagePropertyGIFLoopCount: 0
+                kCGImagePropertyGIFLoopCount: 0,
+                kCGImagePropertyGIFHasGlobalColorMap: true
             ]
         ]
         CGImageDestinationSetProperties(destination, fileProperties as CFDictionary)
 
         let frameProperties: [CFString: Any] = [
+            kCGImagePropertyDepth: 8,
+            kCGImageDestinationLossyCompressionQuality: 1.0,
+            kCGImageDestinationOptimizeColorForSharing: true,
             kCGImagePropertyGIFDictionary: [
                 kCGImagePropertyGIFUnclampedDelayTime: frameDelay,
                 kCGImagePropertyGIFDelayTime: frameDelay

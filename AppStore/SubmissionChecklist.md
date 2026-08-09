@@ -1,18 +1,18 @@
 # MouseLens App Store / TestFlight Checklist
 
-Updated: 2026-07-20
+Updated: 2026-08-09
 
 ## Current Repository State
 
 - Source project exists.
 - Canonical local test app exists at `.LocalTestApp/MouseLens.app`.
-- MouseLens 1.1 has been approved and released.
-- Active development branch: `codex/1.2-development`.
+- MouseLens 1.2 has been approved and released.
+- Active development branch: `codex/1.3-development`.
 - App Store metadata drafts now exist under `AppStore/`.
 - App icon is included in `Resources/Assets.xcassets`.
 - Release uses App Sandbox, Hardened Runtime, and Team `6UYTZXY3H9`.
 
-## 1.2 Blocking Items Before Upload
+## 1.3 Blocking Items Before Upload
 
 - [x] Apple Developer Program account available.
 - [x] App Store Connect app record created.
@@ -20,8 +20,8 @@ Updated: 2026-07-20
 - [x] `DEVELOPMENT_TEAM` configured for distribution signing.
 - [x] Signing/capabilities configured for Mac App Store distribution.
 - [x] App icon added to `Resources/Assets.xcassets`.
-- [ ] Set version to `1.2`.
-- [ ] Set build number higher than the latest uploaded 1.1 build.
+- [x] Set version to `1.3`.
+- [x] Set build number higher than the latest uploaded 1.2 build.
 - [ ] Run full test suite.
 - [ ] Fresh canonical app build with `./scripts/prepare_local_test_app.sh`.
 - [ ] Screen recording smoke test.
@@ -47,8 +47,8 @@ Updated: 2026-07-20
 - [x] Privacy Policy URL
 - [ ] Copyright owner confirmation
 - [ ] Contact email/support page
-- [x] What's New draft for 1.2
-- [x] Promotional text draft for 1.2
+- [x] What's New draft for 1.3
+- [x] Promotional text draft for 1.3
 
 ## Required Visual Assets
 
@@ -57,7 +57,7 @@ Updated: 2026-07-20
 - [ ] Update screenshots for 1.2 if marketing Presenter Camera or GIF export
 - [ ] Optional app preview video
 
-Recommended screenshot set for 1.2:
+Recommended screenshot set for 1.3:
 
 1. Recording toolbar ready state
 2. Countdown or floating recording toolbar
@@ -66,6 +66,8 @@ Recommended screenshot set for 1.2:
 5. Presenter camera bubble controls
 6. GIF/MP4 export panel
 7. Background/padding/corner radius inspector
+8. Captions panel and caption timeline
+9. Cursor style picker
 
 ## Pre-Upload Validation
 

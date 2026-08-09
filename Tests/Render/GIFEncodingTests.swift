@@ -37,6 +37,31 @@ final class GIFEncodingTests: XCTestCase {
         XCTAssertNotNil(delay)
         XCTAssertEqual(delay ?? 0, expectedDelay, accuracy: 0.0001)
     }
+
+    func testEncodeGIFWritesGlobalColorMapHints() throws {
+        let destinationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("gif")
+
+        let frames = [
+            makeGradientFrame(size: CGSize(width: 64, height: 36)),
+            makeGradientFrame(size: CGSize(width: 64, height: 36), phase: 0.18)
+        ]
+
+        try GIFFrameEncoder.encode(
+            frames: frames,
+            frameDelay: 1.0 / 15.0,
+            destinationURL: destinationURL
+        )
+
+        guard let source = CGImageSourceCreateWithURL(destinationURL as CFURL, nil) else {
+            return XCTFail("Failed to read GIF")
+        }
+
+        let fileProperties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
+        let fileGIFProperties = fileProperties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+        XCTAssertEqual(fileGIFProperties?[kCGImagePropertyGIFHasGlobalColorMap] as? Bool, true)
+    }
 }
 
 private func makeSolidFrame(color: CGColor, size: CGSize) -> CGImage {
@@ -52,5 +77,24 @@ private func makeSolidFrame(color: CGColor, size: CGSize) -> CGImage {
     )!
     context.setFillColor(color)
     context.fill(CGRect(origin: .zero, size: size))
+    return context.makeImage()!
+}
+
+private func makeGradientFrame(size: CGSize, phase: CGFloat = 0) -> CGImage {
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let context = CGContext(
+        data: nil,
+        width: Int(size.width),
+        height: Int(size.height),
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    for x in 0..<Int(size.width) {
+        let t = (CGFloat(x) / max(size.width - 1, 1) + phase).truncatingRemainder(dividingBy: 1)
+        context.setFillColor(CGColor(red: t, green: 0.3 + 0.4 * t, blue: 1 - t, alpha: 1))
+        context.fill(CGRect(x: CGFloat(x), y: 0, width: 1, height: size.height))
+    }
     return context.makeImage()!
 }

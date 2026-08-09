@@ -1,6 +1,6 @@
 # MouseLens App Store Metadata Draft
 
-Updated: 2026-07-20
+Updated: 2026-08-09
 
 ## App Identity
 
@@ -10,9 +10,9 @@ Updated: 2026-07-20
 - Platform: macOS
 - Category: Photo & Video
 - Minimum macOS: 14.0
-- Current live/App Store version: 1.1
-- Next submission draft: 1.2
-- Next build: TBD
+- Current live/App Store version: 1.2
+- Next submission draft: 1.3
+- Next build: 5
 
 ## Subtitle
 
@@ -20,7 +20,7 @@ Polished screen recordings, fast.
 
 ## Promotional Text
 
-Create polished screen demos with smooth zoom, clean cursor emphasis, presenter camera, beautiful backgrounds, and MP4 or GIF export.
+Create polished screen demos with smooth zoom, captions, presenter camera, custom cursor styles, beautiful backgrounds, and MP4 or GIF export.
 
 ## Description
 
@@ -35,6 +35,9 @@ Key features:
 - Automatic zoom moments based on interaction
 - Manual zoom segments with editable focus and timing
 - Presenter camera bubble with adjustable position, size, and corner radius
+- Local caption generation and editable subtitle segments
+- Built-in English and Simplified Chinese interface
+- Multiple cursor styles for clearer or more expressive demos
 - Built-in wallpaper backgrounds, padding, and rounded-corner controls
 - Timeline trim controls
 - MP4 export for high-quality videos
@@ -65,14 +68,14 @@ https://guoxinling.github.io/mouselens-site/privacy.html
 
 ## What's New in This Version
 
-MouseLens 1.2 adds presenter camera support, GIF export, and a refreshed background system.
+MouseLens 1.3 makes screen demos easier to explain and share.
 
-- Add a draggable presenter camera bubble before recording.
-- Keep the presenter bubble position, size, and rounded-corner style consistent in recording, preview, and export.
-- Export short clips as GIFs, with 720p and 1080p options.
-- Use the new wallpaper background presets for cleaner product demos.
-- Control playback with the spacebar in the editor.
-- Improved preview layout, playback controls, and timeline behavior.
+- Generate editable captions from recorded speech.
+- Export captions directly in MP4 and GIF files.
+- Choose from new cursor styles, including pointer hand, magic wand, and cat paw.
+- Use the app in English or Simplified Chinese.
+- Improved GIF quality for cleaner short clips.
+- Improved cursor size consistency between preview and export.
 
 ## Review Notes
 
@@ -85,7 +88,7 @@ Suggested review flow:
 3. Grant Camera permission if testing the presenter camera bubble.
 4. Start a short screen or window recording.
 5. Finish recording from the floating recording toolbar.
-6. In the editor, play the recording, adjust background, padding, zoom, or presenter bubble settings if desired, then export MP4 or GIF.
+6. In the editor, play the recording, generate captions if desired, adjust background, padding, zoom, presenter bubble, or cursor style settings, then export MP4 or GIF.
 
 No account is required.
 
